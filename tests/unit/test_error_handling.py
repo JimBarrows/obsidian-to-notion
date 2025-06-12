@@ -97,12 +97,7 @@ class TestSafeFileOperation(unittest.TestCase):
         def read_file(path):
             raise FileNotFoundError("File not found")
 
-        # FileNotFoundError is overridden in the module
-        from obsidian_to_notion.utils.error_handling import (
-            FileNotFoundError as CustomFileNotFoundError,
-        )
-
-        with self.assertRaises(CustomFileNotFoundError) as cm:
+        with self.assertRaises(MigrationError) as cm:
             read_file("/test/file.txt")
         self.assertIn("File not found", str(cm.exception))
 

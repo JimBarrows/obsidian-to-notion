@@ -7,14 +7,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 import yaml
-
 from obsidian_to_notion.config import (
     AppConfig,
     LoggingConfig,
     MigrationConfig,
     NotionConfig,
     VaultConfig,
-    load_config,
 )
 
 
@@ -98,9 +96,7 @@ class TestLoggingConfig(unittest.TestCase):
 
     def test_logging_config_custom_values(self):
         """Test LoggingConfig with custom values."""
-        config = LoggingConfig(
-            level="DEBUG", progress_bar=False, log_file="custom.log"
-        )
+        config = LoggingConfig(level="DEBUG", progress_bar=False, log_file="custom.log")
         self.assertEqual(config.level, "DEBUG")
         self.assertFalse(config.progress_bar)
         self.assertEqual(config.log_file, "custom.log")
@@ -212,7 +208,9 @@ class TestAppConfig(unittest.TestCase):
         )
         with self.assertRaises(ValueError) as cm:
             config.validate()
-        self.assertIn("NOTION_TOKEN environment variable is required", str(cm.exception))
+        self.assertIn(
+            "NOTION_TOKEN environment variable is required", str(cm.exception)
+        )
 
     def test_validate_invalid_batch_size(self):
         """Test validation fails with invalid batch size."""
@@ -249,66 +247,6 @@ class TestAppConfig(unittest.TestCase):
         with self.assertRaises(ValueError) as cm:
             config.validate()
         self.assertIn("timeout must be positive", str(cm.exception))
-
-
-class TestLoadConfigLegacy(unittest.TestCase):
-    """Test legacy load_config function."""
-
-    def setUp(self):
-        """Set up test fixtures."""
-        self.temp_dir = tempfile.mkdtemp()
-        self.config_file = Path(self.temp_dir) / "config.yaml"
-
-    def tearDown(self):
-        """Clean up test fixtures."""
-        import shutil
-
-        shutil.rmtree(self.temp_dir)
-
-    def test_load_config_with_file(self):
-        """Test loading config from file."""
-        config_data = {
-            "notion_token": "file-token",
-            "skip_patterns": [".git/"],
-        }
-        with open(self.config_file, "w") as f:
-            yaml.dump(config_data, f)
-
-        config = load_config(self.config_file)
-        # Legacy function doesn't load from file, only env vars and defaults
-        self.assertIn("skip_patterns", config)
-        self.assertIn("attachment_extensions", config)
-
-    def test_load_config_env_override(self):
-        """Test environment variables override file config."""
-        config_data = {"notion_token": "file-token"}
-        with open(self.config_file, "w") as f:
-            yaml.dump(config_data, f)
-
-        with patch.dict(
-            os.environ,
-            {"NOTION_TOKEN": "env-token", "NOTION_WORKSPACE_ID": "env-workspace"},
-        ):
-            config = load_config(self.config_file)
-
-        self.assertEqual(config["notion_token"], "env-token")
-        self.assertEqual(config["notion_workspace_id"], "env-workspace")
-
-    def test_load_config_defaults(self):
-        """Test default values are set."""
-        config = load_config(Path("/non/existent.yaml"))
-        self.assertEqual(config["skip_patterns"], [".obsidian/", ".trash/"])
-        self.assertEqual(
-            config["attachment_extensions"],
-            [".png", ".jpg", ".jpeg", ".gif", ".pdf", ".mp4", ".mov"],
-        )
-        self.assertEqual(config["max_retries"], 3)
-        self.assertEqual(config["batch_size"], 10)
-
-    def test_load_config_string_path(self):
-        """Test load_config accepts string path."""
-        config = load_config("/non/existent.yaml")
-        self.assertIsInstance(config, dict)
 
 
 if __name__ == "__main__":
