@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import yaml
+
 from obsidian_to_notion.main import main, setup_logging
 
 

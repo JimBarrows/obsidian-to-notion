@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from notion_client.errors import APIResponseError
+
 from obsidian_to_notion.notion.client import NotionClient
 
 

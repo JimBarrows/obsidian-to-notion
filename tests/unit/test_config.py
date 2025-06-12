@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import yaml
+
 from obsidian_to_notion.config import (
     AppConfig,
     LoggingConfig,
