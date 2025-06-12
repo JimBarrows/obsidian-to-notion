@@ -149,3 +149,5 @@ cython_debug/
 # Custom
 config.yaml
 !config.yaml.example
+test_config.py
+migration.log
