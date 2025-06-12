@@ -1,4 +1,4 @@
-"""Obsidian to Notion Migration Tool
+"""Obsidian to Notion Migration Tool.
 
 A Python utility for migrating Obsidian markdown files to Notion,
 handling wikilink conversion, file attachments, and deduplication.
