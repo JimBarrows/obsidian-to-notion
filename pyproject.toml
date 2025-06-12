@@ -16,7 +16,7 @@ dependencies = [
     "PyYAML==6.0.1",
     "python-dotenv==1.0.0",
     "python-frontmatter==1.0.0",
-    "requests==2.31.0",
+    "requests==2.32.4",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
