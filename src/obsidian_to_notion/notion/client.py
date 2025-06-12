@@ -34,7 +34,7 @@ class NotionClient:
             response = self.client.search(
                 query=query, filter={"property": "object", "value": "page"}
             )
-            return response.get("results", [])  # type: ignore[no-any-return]
+            return response.get("results", [])  # type: ignore[no-any-return,union-attr]
         except APIResponseError as e:
             logger.error(f"Failed to search pages: {e}")
             return []
@@ -79,8 +79,7 @@ class NotionClient:
                 if title_prop.get("type") == "title":
                     title_array = title_prop.get("title", [])
                     if title_array:
-                        # type: ignore[no-any-return]
-                        return title_array[0].get("plain_text", "")
+                        return title_array[0].get("plain_text", "")  # type: ignore[no-any-return]
 
         return ""
 
@@ -111,13 +110,13 @@ class NotionClient:
         # Set title property
         props = page_data.get("properties", {})
         props["title"] = {"title": [{"text": {"content": title}}]}
-        page_data["properties"] = props
+        page_data["properties"] = props  # type: ignore[index]
 
         try:
             page = self.client.pages.create(**page_data)
             self._page_cache[title] = page
             logger.info(f"Created page: {title}")
-            return page  # type: ignore[no-any-return]
+            return page  # type: ignore[no-any-return,return-value,assignment]
         except APIResponseError as e:
             logger.error(f"Failed to create page '{title}': {e}")
             raise
@@ -133,7 +132,7 @@ class NotionClient:
             Updated page object
         """
         try:
-            # type: ignore[no-any-return]
+            # type: ignore[no-any-return,return-value]
             return self.client.pages.update(page_id=page_id, properties=properties)
         except APIResponseError as e:
             logger.error(f"Failed to update page {page_id}: {e}")
@@ -153,7 +152,7 @@ class NotionClient:
             response = self.client.blocks.children.append(
                 block_id=page_id, children=blocks
             )
-            return response.get("results", [])  # type: ignore[no-any-return]
+            return response.get("results", [])  # type: ignore[no-any-return,union-attr]
         except APIResponseError as e:
             logger.error(f"Failed to append blocks to {page_id}: {e}")
             raise

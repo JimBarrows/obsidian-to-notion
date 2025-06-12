@@ -46,6 +46,9 @@ dev = [
     "safety>=3.0",
     "ruff>=0.1.0",
     "isort>=5.12.0",
+    "types-PyYAML>=6.0",
+    "types-requests>=2.0",
+    "types-tqdm>=4.0",
 ]
 test = [
     "pytest>=7.0",
