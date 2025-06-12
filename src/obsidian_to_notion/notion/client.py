@@ -79,8 +79,7 @@ class NotionClient:
                 if title_prop.get("type") == "title":
                     title_array = title_prop.get("title", [])
                     if title_array:
-                        # type: ignore[no-any-return]
-                        return title_array[0].get("plain_text", "")
+                        return str(title_array[0].get("plain_text", ""))
 
         return ""
 
@@ -109,15 +108,18 @@ class NotionClient:
         }
 
         # Set title property
-        props = page_data.get("properties", {})
-        props["title"] = {"title": [{"text": {"content": title}}]}
-        page_data["properties"] = props  # type: ignore[index]
+        props = page_data["properties"]
+        if isinstance(props, dict):
+            props["title"] = {"title": [{"text": {"content": title}}]}
 
         try:
             page = self.client.pages.create(**page_data)
-            self._page_cache[title] = page
-            logger.info(f"Created page: {title}")
-            return page  # type: ignore[no-any-return,return-value,assignment]
+            if isinstance(page, dict):
+                self._page_cache[title] = page
+                logger.info(f"Created page: {title}")
+                return page
+            else:
+                raise ValueError("Unexpected response type from Notion API")
         except APIResponseError as e:
             logger.error(f"Failed to create page '{title}': {e}")
             raise
@@ -133,8 +135,11 @@ class NotionClient:
             Updated page object
         """
         try:
-            # type: ignore[no-any-return,return-value]
-            return self.client.pages.update(page_id=page_id, properties=properties)
+            result = self.client.pages.update(page_id=page_id, properties=properties)
+            if isinstance(result, dict):
+                return result
+            else:
+                raise ValueError("Unexpected response type from Notion API")
         except APIResponseError as e:
             logger.error(f"Failed to update page {page_id}: {e}")
             raise

@@ -2,7 +2,7 @@
 
 from typing import Optional
 
-from tqdm import tqdm
+from tqdm import tqdm  # type: ignore[import-untyped]
 
 
 class ProgressReporter:

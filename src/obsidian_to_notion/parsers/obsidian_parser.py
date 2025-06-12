@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 from typing import Dict, List, Optional
 
-import frontmatter
+import frontmatter  # type: ignore[import-untyped]
 
 
 class ObsidianVaultProcessor:
