@@ -79,7 +79,8 @@ class NotionClient:
                 if title_prop.get("type") == "title":
                     title_array = title_prop.get("title", [])
                     if title_array:
-                        return title_array[0].get("plain_text", "")  # type: ignore[no-any-return]
+                        # type: ignore[no-any-return]
+                        return title_array[0].get("plain_text", "")
 
         return ""
 
