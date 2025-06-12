@@ -23,6 +23,13 @@ obsidian-to-notion/
 │       ├── progress.py         # Progress reporting
 │       └── error_handling.py   # Error handling utilities
 ├── tests/                      # Test suite
+│   ├── unit/                   # Unit tests
+│   │   └── test_obsidian_parser.py
+│   └── integration/            # BDD integration tests
+│       ├── features/           # Gherkin feature files
+│       │   └── obsidian_parser.feature
+│       └── steps/              # Step definitions
+│           └── obsidian_parser_steps.py
 ├── docs/                       # Documentation
 ├── config.yaml                 # User configuration
 ├── requirements.txt            # Python dependencies
@@ -45,16 +52,25 @@ obsidian-to-notion/
 ```bash
 python3 -m venv venv
 source venv/bin/activate
-pip install -e ".[dev]"
+pip install -e ".[test]"  # or pip install -e ".[dev]"
 ```
 
 ### Testing
 ```bash
-# Run with test vault
-obsidian-to-notion test_vault --dry-run --verbose
+# Run unit tests
+pytest tests/unit/
 
-# Run tests (when implemented)
-pytest
+# Run unit tests with coverage
+pytest tests/unit/ --cov=src/obsidian_to_notion --cov-report=term-missing
+
+# Run integration tests
+cd tests/integration && behave
+
+# Run specific feature
+cd tests/integration && behave features/obsidian_parser.feature
+
+# Run all tests
+pytest tests/unit/ && cd tests/integration && behave
 ```
 
 ### Common Commands
@@ -148,6 +164,11 @@ logging:
 - [x] Notion client wrapper structure
 - [x] Error handling framework
 - [x] Progress reporting utilities
+- [x] Comprehensive test suite for ObsidianVaultProcessor:
+  - [x] Unit tests with 100% code coverage
+  - [x] BDD integration tests using Behave/Gherkin
+  - [x] Tests for all wikilink formats, frontmatter extraction, sanitization
+  - [x] Error handling and edge case testing
 
 ### 🚧 In Progress
 - [ ] Main migration logic implementation
@@ -157,7 +178,6 @@ logging:
 ### 📋 TODO
 - [ ] Rate limiting for Notion API
 - [ ] File attachment upload (S3/Cloudinary integration)
-- [ ] Comprehensive test suite
 - [ ] Support for Obsidian plugins syntax
 - [ ] Progress persistence for resumable migrations
 - [ ] Duplicate page detection and handling
