@@ -118,7 +118,12 @@ logging:
 
 ## Architecture Notes
 
-- **Parser**: Uses regex patterns to extract wikilinks, embeds, and tags from Obsidian markdown
+- **Parser**: ObsidianVaultProcessor recursively scans vault directories and extracts:
+  - All markdown files with frontmatter metadata
+  - Wikilinks in all variations: `[[note]]`, `[[note|alias]]`, `[[note#section]]`, `![[embed]]`
+  - Embedded attachments (images, PDFs, documents)
+  - Creates a wikilink map for cross-reference resolution
+  - Sanitizes text for Notion compatibility
 - **Notion Client**: Wrapper around notion-client with retry logic and rate limiting support
 - **Config**: Dataclass-based configuration with YAML loading, env var overrides, and validation
 - **Error Handling**: Custom exception hierarchy for different error scenarios
@@ -133,7 +138,13 @@ logging:
 - [x] Environment variable overrides
 - [x] CLI argument parsing
 - [x] Logging system with file output
-- [x] Basic Obsidian parser (wikilinks, embeds, tags)
+- [x] ObsidianVaultProcessor implementation:
+  - [x] Recursive vault scanning for markdown files and attachments
+  - [x] Frontmatter extraction (title, tags, date, custom metadata)
+  - [x] Comprehensive wikilink parsing (all Obsidian link formats)
+  - [x] Embedded attachment detection
+  - [x] Wikilink map creation for cross-references
+  - [x] Text sanitization for Notion compatibility
 - [x] Notion client wrapper structure
 - [x] Error handling framework
 - [x] Progress reporting utilities

@@ -1,141 +1,130 @@
 """Parser for Obsidian markdown files."""
 
+import os
 import re
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
-
 import frontmatter
 
 
-class ObsidianParser:
-    """Parse Obsidian markdown files and extract content, metadata, and links."""
+class ObsidianVaultProcessor:
+    """Process Obsidian vault and extract all content."""
     
-    # Regex patterns for Obsidian syntax
-    WIKILINK_PATTERN = re.compile(r'\[\[([^\]]+)\]\]')
-    EMBED_PATTERN = re.compile(r'!\[\[([^\]]+)\]\]')
-    TAG_PATTERN = re.compile(r'#([\w-]+)')
-    
-    def __init__(self, vault_path: Path):
-        """Initialize the parser with the vault path.
+    def __init__(self, vault_path: str):
+        """Initialize the processor with the vault path.
         
         Args:
             vault_path: Path to the Obsidian vault directory
         """
-        self.vault_path = vault_path
+        self.vault_path = Path(vault_path)
+        self.markdown_files = []
+        self.attachments = []
+        self.wikilink_map = {}
     
-    def parse_file(self, file_path: Path) -> Dict:
-        """Parse an Obsidian markdown file.
+    def process_vault(self) -> Dict:
+        """Process entire Obsidian vault and extract all content"""
+        print(f"Processing vault at: {self.vault_path}")
         
-        Args:
-            file_path: Path to the markdown file
-            
-        Returns:
-            Dictionary containing parsed content and metadata
-        """
-        with open(file_path, 'r', encoding='utf-8') as f:
-            post = frontmatter.load(f)
+        if not self.vault_path.exists():
+            raise FileNotFoundError(f"Vault path does not exist: {self.vault_path}")
         
-        content = post.content
-        metadata = post.metadata
+        for file_path in self.vault_path.rglob('*'):
+            if file_path.suffix == '.md':
+                file_info = self.process_markdown_file(file_path)
+                if file_info:
+                    self.markdown_files.append(file_info)
+            elif file_path.suffix.lower() in ['.png', '.jpg', '.jpeg', '.gif', '.pdf', '.docx', '.xlsx']:
+                self.attachments.append(file_path)
         
-        # Extract links and embeds
-        wikilinks = self.extract_wikilinks(content)
-        embeds = self.extract_embeds(content)
-        tags = self.extract_tags(content)
-        
-        # Get file info
-        relative_path = file_path.relative_to(self.vault_path)
+        print(f"Found {len(self.markdown_files)} markdown files and {len(self.attachments)} attachments")
         
         return {
-            'path': file_path,
-            'relative_path': relative_path,
-            'title': file_path.stem,
-            'content': content,
-            'metadata': metadata,
-            'wikilinks': wikilinks,
-            'embeds': embeds,
-            'tags': tags,
+            'markdown_files': self.markdown_files,
+            'attachments': self.attachments,
+            'wikilink_map': self.wikilink_map
         }
     
-    def extract_wikilinks(self, content: str) -> List[Tuple[str, str]]:
-        """Extract wikilinks from content.
-        
-        Args:
-            content: Markdown content
+    def process_markdown_file(self, file_path: Path) -> Optional[Dict]:
+        """Process a single markdown file."""
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                post = frontmatter.load(f)
             
-        Returns:
-            List of tuples (full_match, link_text)
-        """
-        matches = []
-        for match in self.WIKILINK_PATTERN.finditer(content):
-            full_match = match.group(0)
-            link_text = match.group(1)
-            matches.append((full_match, link_text))
-        return matches
+            # Extract title from filename if not in frontmatter
+            title = post.metadata.get('title', file_path.stem)
+            
+            # Find wikilinks in content
+            wikilinks = self.extract_wikilinks(post.content)
+            
+            # Find attachments referenced in content
+            embedded_attachments = self.extract_embedded_attachments(post.content)
+            
+            file_info = {
+                'path': file_path,
+                'title': title,
+                'metadata': post.metadata,
+                'content': post.content,
+                'wikilinks': wikilinks,
+                'embedded_attachments': embedded_attachments,
+                'relative_path': file_path.relative_to(self.vault_path)
+            }
+            
+            # Build wikilink map for later resolution
+            self.wikilink_map[title.lower()] = file_path
+            
+            return file_info
+            
+        except Exception as e:
+            print(f"Error processing {file_path}: {e}")
+            return None
     
-    def extract_embeds(self, content: str) -> List[Tuple[str, str]]:
-        """Extract embedded files from content.
+    def extract_wikilinks(self, content: str) -> List[Dict]:
+        """Extract all wikilink variations from content"""
+        # Comprehensive regex for all wikilink types
+        wikilink_pattern = r'(!)?\[\[(?:([^|\]#]+?)(?:#([^|\]]+?))?(?:\|([^\]]+?))?)?\]\]'
         
-        Args:
-            content: Markdown content
+        wikilinks = []
+        for match in re.finditer(wikilink_pattern, content):
+            is_embed, note_name, heading, display_text = match.groups()
             
-        Returns:
-            List of tuples (full_match, embed_path)
-        """
-        matches = []
-        for match in self.EMBED_PATTERN.finditer(content):
-            full_match = match.group(0)
-            embed_path = match.group(1)
-            matches.append((full_match, embed_path))
-        return matches
+            wikilinks.append({
+                'original': match.group(0),
+                'is_embed': bool(is_embed),
+                'note_name': note_name or display_text,
+                'heading': heading,
+                'display_text': display_text or note_name,
+                'start': match.start(),
+                'end': match.end()
+            })
+        
+        return wikilinks
     
-    def extract_tags(self, content: str) -> List[str]:
-        """Extract tags from content.
+    def extract_embedded_attachments(self, content: str) -> List[str]:
+        """Extract embedded attachment references"""
+        # Pattern for embedded images and files
+        attachment_pattern = r'!\[\[([^\]]+\.(png|jpg|jpeg|gif|pdf|docx|xlsx))\]\]'
         
-        Args:
-            content: Markdown content
-            
-        Returns:
-            List of tag names
-        """
-        return list(set(match.group(1) for match in self.TAG_PATTERN.finditer(content)))
+        attachments = []
+        for match in re.finditer(attachment_pattern, content, re.IGNORECASE):
+            attachments.append(match.group(1))
+        
+        return attachments
     
-    def resolve_link(self, link_text: str, from_file: Path) -> Optional[Path]:
-        """Resolve a wikilink to an actual file path.
+    def sanitize_for_notion(self, text: str) -> str:
+        """Clean text for Notion compatibility"""
+        replacements = {
+            '\u00a0': ' ',  # Non-breaking space
+            '*': '',        # Asterisk in filenames
+            '/': '-',       # Forward slash
+            '\\': '-',      # Backslash
+            '<': '',
+            '>': '',
+            '|': '-',
+            '?': '',
+            ':': '-'
+        }
         
-        Args:
-            link_text: The text inside the wikilink
-            from_file: The file containing the link
-            
-        Returns:
-            Resolved file path or None if not found
-        """
-        # Handle aliases (e.g., [[file|alias]])
-        if '|' in link_text:
-            link_path, _ = link_text.split('|', 1)
-        else:
-            link_path = link_text
+        for old, new in replacements.items():
+            text = text.replace(old, new)
         
-        # Handle section links (e.g., [[file#section]])
-        if '#' in link_path:
-            link_path = link_path.split('#')[0]
-        
-        # If empty after removing section, it's a same-file link
-        if not link_path:
-            return from_file
-        
-        # Try different resolution strategies
-        strategies = [
-            # Absolute path from vault root
-            self.vault_path / f"{link_path}.md",
-            self.vault_path / link_path,
-            # Relative to current file
-            from_file.parent / f"{link_path}.md",
-            from_file.parent / link_path,
-        ]
-        
-        for path in strategies:
-            if path.exists() and path.is_file():
-                return path
-        
-        return None
+        return text.strip()
