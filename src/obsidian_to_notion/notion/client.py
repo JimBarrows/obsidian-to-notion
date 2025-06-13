@@ -168,24 +168,14 @@ class NotionMigrationClient:
         Returns:
             The file URL or None if upload failed
         """
-        try:
-            with open(file_path, "rb") as f:
-                file_data = f.read()
-
-            # Note: The actual Notion API doesn't have a direct file upload endpoint
-            # This is a simplified version for demonstration
-            # In practice, you would need to use external storage (S3, etc.)
-            response = self.rate_limited_request(
-                self.client.files.upload,
-                file=file_data,
-                filename=file_path.split("/")[-1],
-            )
-
-            return response.get("url") if response else None
-
-        except Exception as e:
-            logger.error(f"Error uploading file {file_path}: {e}")
-            return None
+        # Note: The Notion API doesn't have a direct file upload endpoint
+        # Files must be uploaded to external storage (S3, Cloudinary, etc.)
+        # and then referenced by URL in Notion blocks
+        logger.warning(
+            f"File upload not implemented. File {file_path} needs to be "
+            "uploaded to external storage and referenced by URL."
+        )
+        return None
 
 
 class DeduplicationManager:

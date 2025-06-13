@@ -1,11 +1,10 @@
 """Unit tests for Notion API client."""
 
 import time
-from unittest.mock import MagicMock, Mock, call, patch
+from unittest.mock import Mock, call, patch
 
 import pytest
 from notion_client import APIResponseError
-
 from obsidian_to_notion.notion import DeduplicationManager, NotionMigrationClient
 
 
@@ -246,34 +245,11 @@ class TestNotionMigrationClient:
         assert calls[1] == call(database_id="db-id", start_cursor="cursor-1")
 
     @patch("obsidian_to_notion.notion.client.Client")
-    @patch("builtins.open", new_callable=MagicMock)
-    def test_upload_file_success(self, mock_open, mock_client_class):
-        """Test successful file upload."""
+    def test_upload_file_not_implemented(self, mock_client_class):
+        """Test file upload returns None (not implemented)."""
         client = NotionMigrationClient("test-token")
-        client.client.files.upload = Mock(
-            return_value={"url": "https://notion.so/file.png"}
-        )
-
-        # Mock file reading
-        mock_file = MagicMock()
-        mock_file.read.return_value = b"file content"
-        mock_open.return_value.__enter__.return_value = mock_file
 
         result = client.upload_file("/path/to/file.png")
-
-        assert result == "https://notion.so/file.png"
-        mock_open.assert_called_once_with("/path/to/file.png", "rb")
-        client.client.files.upload.assert_called_once_with(
-            file=b"file content", filename="file.png"
-        )
-
-    @patch("obsidian_to_notion.notion.client.Client")
-    def test_upload_file_error(self, mock_client_class):
-        """Test file upload error handling."""
-        client = NotionMigrationClient("test-token")
-
-        # File doesn't exist
-        result = client.upload_file("/nonexistent/file.png")
 
         assert result is None
 

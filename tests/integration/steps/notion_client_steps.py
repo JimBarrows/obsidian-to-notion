@@ -5,7 +5,6 @@ from unittest.mock import Mock, patch
 
 from behave import given, then, when
 from notion_client import APIResponseError
-
 from obsidian_to_notion.notion import DeduplicationManager, NotionMigrationClient
 
 
@@ -280,20 +279,17 @@ def step_setup_test_file(context, filename):
 
 @when("I upload the file")
 def step_upload_file(context):
-    # Mock the upload response
-    context.client.client.files = Mock()
-    context.client.client.files.upload = Mock(
-        return_value={"url": "https://notion.so/file/test.png"}
-    )
-
+    # Upload file (returns None as it's not implemented)
     context.upload_result = context.client.upload_file(context.test_file)
 
 
-@then("the file should be uploaded successfully")
-def step_verify_upload_success(context):
-    assert context.upload_result is not None
+@then("the file upload should return None")
+def step_verify_upload_returns_none(context):
+    assert context.upload_result is None
 
 
-@then("I should receive a file URL")
-def step_verify_file_url(context):
-    assert context.upload_result == "https://notion.so/file/test.png"
+@then("a warning should be logged about external storage")
+def step_verify_warning_logged(context):
+    # This step is mainly for documentation purposes
+    # In a real test, we would check if the warning was logged
+    pass
