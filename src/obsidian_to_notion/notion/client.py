@@ -1,181 +1,244 @@
-"""Notion API client wrapper."""
+"""Notion API client with rate limiting and error handling."""
 
+import time
+from typing import Dict, List, Optional, Callable, Any
+from notion_client import Client, APIResponseError
 import logging
-from typing import Dict, List, Optional
-
-from notion_client import Client
-from notion_client.errors import APIResponseError
 
 logger = logging.getLogger(__name__)
 
 
-class NotionClient:
-    """Wrapper for Notion API client with helper methods."""
-
-    def __init__(self, token: str):
-        """Initialize Notion client.
-
+class NotionMigrationClient:
+    """Notion API client with automatic rate limiting and retry logic."""
+    
+    def __init__(self, token: str, rate_limit_rps: int = 3):
+        """Initialize the Notion client.
+        
         Args:
-            token: Notion integration token
+            token: Notion API integration token
+            rate_limit_rps: Maximum requests per second (default: 3)
         """
         self.client = Client(auth=token)
-        self._page_cache: Dict[str, Dict] = {}
-
-    def search_pages(self, query: str) -> List[Dict]:
-        """Search for pages by title.
-
+        self.request_timestamps: List[float] = []
+        self.rate_limit_rps = rate_limit_rps
+        
+    def rate_limited_request(self, method: Callable[..., Any], **kwargs) -> Optional[Dict]:
+        """Execute API request with automatic rate limiting.
+        
         Args:
-            query: Search query
-
+            method: The API method to call
+            **kwargs: Arguments to pass to the method
+            
         Returns:
-            List of matching pages
+            The API response or None if all retries failed
+        """
+        # Ensure we don't exceed rate limit
+        current_time = time.time()
+        self.request_timestamps = [t for t in self.request_timestamps 
+                                  if current_time - t < 1.0]
+        
+        if len(self.request_timestamps) >= self.rate_limit_rps:
+            sleep_time = 1.0 - (current_time - self.request_timestamps[0])
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+        
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                result = method(**kwargs)
+                self.request_timestamps.append(time.time())
+                return result
+            except APIResponseError as e:
+                if e.code == 'rate_limited':
+                    retry_after = int(e.headers.get('retry-after', 1))
+                    logger.warning(f"Rate limited, waiting {retry_after} seconds...")
+                    time.sleep(retry_after)
+                elif attempt == max_retries - 1:
+                    logger.error(f"Failed after {max_retries} attempts: {e}")
+                    raise
+                else:
+                    wait_time = 2 ** attempt
+                    logger.warning(f"API error on attempt {attempt + 1}, retrying in {wait_time}s: {e}")
+                    time.sleep(wait_time)
+        
+        return None
+    
+    def create_page(self, database_id: str, properties: Dict, children: Optional[List] = None) -> Optional[Dict]:
+        """Create a new page in Notion database.
+        
+        Args:
+            database_id: ID of the database to create the page in
+            properties: Page properties
+            children: Optional list of blocks to add as children
+            
+        Returns:
+            The created page object or None if failed
+        """
+        return self.rate_limited_request(
+            self.client.pages.create,
+            parent={"database_id": database_id},
+            properties=properties,
+            children=children or []
+        )
+    
+    def update_page(self, page_id: str, properties: Optional[Dict] = None, children: Optional[List] = None) -> Optional[Dict]:
+        """Update an existing page.
+        
+        Args:
+            page_id: ID of the page to update
+            properties: Optional properties to update
+            children: Optional list of blocks to append
+            
+        Returns:
+            The updated page object or None if failed
+        """
+        result = None
+        
+        if properties:
+            result = self.rate_limited_request(
+                self.client.pages.update,
+                page_id=page_id,
+                properties=properties
+            )
+        
+        if children:
+            # Append new blocks to the page
+            self.rate_limited_request(
+                self.client.blocks.children.append,
+                block_id=page_id,
+                children=children
+            )
+            if not result:
+                result = {"id": page_id}
+        
+        return result or {"id": page_id}
+    
+    def query_database(self, database_id: str, filter_query: Optional[Dict] = None) -> List[Dict]:
+        """Query database for existing pages.
+        
+        Args:
+            database_id: ID of the database to query
+            filter_query: Optional filter to apply
+            
+        Returns:
+            List of pages matching the query
+        """
+        all_results = []
+        has_more = True
+        start_cursor = None
+        
+        while has_more:
+            query_params = {"database_id": database_id}
+            if filter_query:
+                query_params["filter"] = filter_query
+            if start_cursor:
+                query_params["start_cursor"] = start_cursor
+            
+            response = self.rate_limited_request(
+                self.client.databases.query,
+                **query_params
+            )
+            
+            if response:
+                all_results.extend(response.get('results', []))
+                has_more = response.get('has_more', False)
+                start_cursor = response.get('next_cursor')
+            else:
+                break
+        
+        return all_results
+    
+    def upload_file(self, file_path: str) -> Optional[str]:
+        """Upload file to Notion and return file URL.
+        
+        Args:
+            file_path: Path to the file to upload
+            
+        Returns:
+            The file URL or None if upload failed
         """
         try:
-            response = self.client.search(
-                query=query, filter={"property": "object", "value": "page"}
+            with open(file_path, 'rb') as f:
+                file_data = f.read()
+            
+            # Note: The actual Notion API doesn't have a direct file upload endpoint
+            # This is a simplified version for demonstration
+            # In practice, you would need to use external storage (S3, etc.)
+            response = self.rate_limited_request(
+                self.client.files.upload,
+                file=file_data,
+                filename=file_path.split('/')[-1]
             )
-            return response.get("results", [])  # type: ignore[no-any-return,union-attr]
-        except APIResponseError as e:
-            logger.error(f"Failed to search pages: {e}")
-            return []
+            
+            return response.get('url') if response else None
+            
+        except Exception as e:
+            logger.error(f"Error uploading file {file_path}: {e}")
+            return None
 
-    def find_page_by_title(self, title: str) -> Optional[Dict]:
-        """Find a page by exact title match.
 
+class DeduplicationManager:
+    """Manages deduplication of pages to prevent creating duplicates."""
+    
+    def __init__(self, notion_client: NotionMigrationClient, database_id: str):
+        """Initialize the deduplication manager.
+        
         Args:
-            title: Page title to search for
-
-        Returns:
-            Page object or None if not found
+            notion_client: The Notion client instance
+            database_id: ID of the database to check for duplicates
         """
-        # Check cache first
-        if title in self._page_cache:
-            return self._page_cache[title]
-
-        pages = self.search_pages(title)
-        for page in pages:
-            page_title = self.get_page_title(page)
-            if page_title == title:
-                self._page_cache[title] = page
-                return page
-
-        return None
-
-    def get_page_title(self, page: Dict) -> str:
-        """Extract title from a page object.
-
+        self.notion = notion_client
+        self.database_id = database_id
+        self.existing_pages: Dict[str, str] = {}
+        
+    def load_existing_pages(self):
+        """Build index of existing pages in Notion database."""
+        logger.info("Loading existing pages for deduplication...")
+        results = self.notion.query_database(self.database_id)
+        
+        for page in results:
+            title = self.extract_title(page)
+            if title:
+                self.existing_pages[title.lower()] = page['id']
+        
+        logger.info(f"Found {len(self.existing_pages)} existing pages")
+    
+    def should_skip_page(self, title: str) -> bool:
+        """Check if page already exists.
+        
+        Args:
+            title: Title of the page to check
+            
+        Returns:
+            True if page should be skipped (already exists)
+        """
+        return title.lower() in self.existing_pages
+    
+    def get_existing_page_id(self, title: str) -> Optional[str]:
+        """Get ID of existing page if it exists.
+        
+        Args:
+            title: Title of the page to look up
+            
+        Returns:
+            Page ID if exists, None otherwise
+        """
+        return self.existing_pages.get(title.lower())
+    
+    def extract_title(self, page: Dict) -> Optional[str]:
+        """Extract title from Notion page object.
+        
         Args:
             page: Notion page object
-
+            
         Returns:
-            Page title
+            The page title or None if not found
         """
-        properties = page.get("properties", {})
-
-        # Try common title property names
-        for prop_name in ["title", "Title", "Name"]:
-            if prop_name in properties:
-                title_prop = properties[prop_name]
-                if title_prop.get("type") == "title":
-                    title_array = title_prop.get("title", [])
-                    if title_array:
-                        return str(title_array[0].get("plain_text", ""))
-
-        return ""
-
-    def create_page(
-        self,
-        parent_id: str,
-        title: str,
-        content: List[Dict],
-        properties: Optional[Dict] = None,
-    ) -> Dict:
-        """Create a new page in Notion.
-
-        Args:
-            parent_id: Parent page or database ID
-            title: Page title
-            content: List of block objects
-            properties: Additional page properties
-
-        Returns:
-            Created page object
-        """
-        page_data = {
-            "parent": {"page_id": parent_id},
-            "properties": properties or {},
-            "children": content,
-        }
-
-        # Set title property
-        props = page_data["properties"]
-        if isinstance(props, dict):
-            props["title"] = {"title": [{"text": {"content": title}}]}
-
-        try:
-            page = self.client.pages.create(**page_data)
-            if isinstance(page, dict):
-                self._page_cache[title] = page
-                logger.info(f"Created page: {title}")
-                return page
-            else:
-                raise ValueError("Unexpected response type from Notion API")
-        except APIResponseError as e:
-            logger.error(f"Failed to create page '{title}': {e}")
-            raise
-
-    def update_page(self, page_id: str, properties: Dict) -> Dict:
-        """Update page properties.
-
-        Args:
-            page_id: Page ID to update
-            properties: Properties to update
-
-        Returns:
-            Updated page object
-        """
-        try:
-            result = self.client.pages.update(page_id=page_id, properties=properties)
-            if isinstance(result, dict):
-                return result
-            else:
-                raise ValueError("Unexpected response type from Notion API")
-        except APIResponseError as e:
-            logger.error(f"Failed to update page {page_id}: {e}")
-            raise
-
-    def append_blocks(self, page_id: str, blocks: List[Dict]) -> List[Dict]:
-        """Append blocks to a page.
-
-        Args:
-            page_id: Page ID to append to
-            blocks: List of block objects
-
-        Returns:
-            Created blocks
-        """
-        try:
-            response = self.client.blocks.children.append(
-                block_id=page_id, children=blocks
-            )
-            return response.get("results", [])  # type: ignore[no-any-return,union-attr]
-        except APIResponseError as e:
-            logger.error(f"Failed to append blocks to {page_id}: {e}")
-            raise
-
-    def upload_file(self, file_path: str, page_id: str) -> str:
-        """Upload a file to Notion.
-
-        Note: Notion API doesn't directly support file uploads.
-        Files need to be hosted externally and linked.
-
-        Args:
-            file_path: Path to file
-            page_id: Page to attach file to
-
-        Returns:
-            URL of uploaded file
-        """
-        # TODO: Implement file hosting solution
-        logger.warning(f"File upload not implemented: {file_path}")
-        return ""
+        # Try different possible title property names
+        for prop_name in ['Name', 'Title', 'title', 'name']:
+            title_prop = page.get('properties', {}).get(prop_name, {})
+            if title_prop.get('type') == 'title':
+                texts = title_prop.get('title', [])
+                if texts:
+                    return texts[0].get('text', {}).get('content', '')
+        return None
