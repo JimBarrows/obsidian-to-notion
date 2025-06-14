@@ -169,6 +169,21 @@ logging:
   - [x] BDD integration tests using Behave/Gherkin
   - [x] Tests for all wikilink formats, frontmatter extraction, sanitization
   - [x] Error handling and edge case testing
+- [x] NotionMigrationClient implementation:
+  - [x] Automatic rate limiting (configurable requests per second)
+  - [x] Retry logic with exponential backoff
+  - [x] Support for rate limit headers from Notion API
+  - [x] Page creation, update, and querying methods
+  - [x] Database pagination handling
+  - [x] File upload placeholder (needs external storage integration)
+- [x] DeduplicationManager implementation:
+  - [x] Load and index existing pages from Notion database
+  - [x] Case-insensitive duplicate detection
+  - [x] Extract titles from various Notion property names
+- [x] Comprehensive test suite for Notion client:
+  - [x] Unit tests with 100% coverage
+  - [x] BDD integration tests for all scenarios
+  - [x] Rate limiting, retry, and error handling tests
 
 ### 🚧 In Progress
 - [ ] Main migration logic implementation
@@ -176,16 +191,13 @@ logging:
 - [ ] Batch processing implementation
 
 ### 📋 TODO
-- [ ] Rate limiting for Notion API
 - [ ] File attachment upload (S3/Cloudinary integration)
 - [ ] Support for Obsidian plugins syntax
 - [ ] Progress persistence for resumable migrations
-- [ ] Duplicate page detection and handling
 - [ ] Rollback capability for failed migrations
 
 ## Current Limitations
 
 1. **File Uploads**: Notion API doesn't support direct file uploads - needs external hosting
-2. **Rate Limiting**: Configuration exists but implementation pending
-3. **Large Vaults**: Batch configuration exists but processing logic not implemented
-4. **Complex Formatting**: Some Obsidian plugins' syntax not supported
+2. **Large Vaults**: Batch configuration exists but processing logic not implemented
+3. **Complex Formatting**: Some Obsidian plugins' syntax not supported
