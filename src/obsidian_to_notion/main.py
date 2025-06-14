@@ -4,7 +4,7 @@
 import argparse
 import logging
 import sys
-from typing import Dict, List
+from typing import Any, Dict, List, Optional
 
 from .config import AppConfig
 from .notion import DeduplicationManager, NotionMigrationClient
@@ -15,12 +15,13 @@ from .utils import MigrationError, ProgressTracker
 class WikilinkConverter:
     """Wrapper for WikilinkConverter with additional functionality."""
 
-    def __init__(self, page_mapping=None):
-        self.page_mapping = page_mapping or {}
-        self.page_cache = {}
-        self.broken_links = []
+    def __init__(self, page_mapping: Optional[Dict[str, str]] = None) -> None:
+        """Initialize WikilinkConverter with optional page mapping."""
+        self.page_mapping: Dict[str, str] = page_mapping or {}
+        self.page_cache: Dict[str, str] = {}
+        self.broken_links: List[str] = []
 
-    def add_page_to_cache(self, title: str, page_id: str):
+    def add_page_to_cache(self, title: str, page_id: str) -> None:
         """Add a page to the cache for link resolution."""
         self.page_cache[title.lower()] = page_id
         self.page_mapping[title] = page_id
@@ -52,13 +53,18 @@ class WikilinkConverter:
 class ObsidianToNotionMigrator:
     """Main orchestrator for Obsidian to Notion migration."""
 
-    def __init__(self, config: AppConfig):
+    def __init__(self, config: AppConfig) -> None:
+        """Initialize the migration orchestrator with configuration."""
         self.config = config
         self.vault_processor = ObsidianVaultProcessor(config.vault.path)
+        if not config.notion.token:
+            raise ValueError("Notion token is required")
         self.notion_client = NotionMigrationClient(
             config.notion.token, config.notion.rate_limit_requests_per_second
         )
         self.wikilink_converter = WikilinkConverter({})
+        if not config.notion.database_id:
+            raise ValueError("Notion database ID is required")
         self.dedup_manager = DeduplicationManager(
             self.notion_client, config.notion.database_id
         )
@@ -74,8 +80,8 @@ class ObsidianToNotionMigrator:
         )
         self.logger = logging.getLogger(__name__)
 
-    def migrate(self, dry_run: bool = False) -> Dict:
-        """Execute complete migration process"""
+    def migrate(self, dry_run: bool = False) -> Dict[str, Any]:
+        """Execute complete migration process."""
         self.logger.info("Starting Obsidian to Notion migration")
 
         try:
@@ -111,52 +117,71 @@ class ObsidianToNotionMigrator:
             self.logger.error(f"Migration failed: {e}")
             raise MigrationError(f"Migration failed: {e}") from e
 
-    def _execute_migration(self, markdown_files: List[Dict]) -> Dict:
-        """Execute the actual migration"""
-        stats = {"successful": 0, "failed": 0, "skipped": 0, "errors": []}
+    def _execute_migration(
+        self, markdown_files: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Execute the actual migration."""
+        stats: Dict[str, Any] = {
+            "successful": 0,
+            "failed": 0,
+            "skipped": 0,
+            "errors": [],
+        }
 
-        with ProgressTracker(len(markdown_files), "Migrating files") as progress:
+        # ProgressTracker is actually ProgressReporter and doesn't support
+        # context manager
+        progress = ProgressTracker()
+        progress.start_main(len(markdown_files), "Migrating files")
+        try:
             for file_info in markdown_files:
                 try:
                     result = self._migrate_single_file(file_info)
 
                     if result["status"] == "skipped":
-                        progress.update(1, "skipped")
+                        progress.update_main(1)
+                        progress.set_main_desc("skipped")
                         stats["skipped"] += 1
                     elif result["status"] == "success":
-                        progress.update(1, "successful")
+                        progress.update_main(1)
+                        progress.set_main_desc("successful")
                         stats["successful"] += 1
                         # Add to wikilink cache for link resolution
                         self.wikilink_converter.add_page_to_cache(
                             file_info["title"], result["page_id"]
                         )
                     else:
-                        progress.update(1, "failed", result.get("error"))
+                        progress.update_main(1)
+                        progress.set_main_desc(f"failed: {result.get('error')}")
                         stats["failed"] += 1
                         stats["errors"].append(
                             {"file": file_info["title"], "error": result.get("error")}
                         )
 
-                    progress.set_postfix(
-                        success=stats["successful"],
-                        failed=stats["failed"],
-                        skipped=stats["skipped"],
-                    )
+                    # Progress reporter doesn't have set_postfix method
 
                 except Exception as e:
                     error_msg = f"Error migrating {file_info['title']}: {e}"
-                    progress.update(1, "failed", error_msg)
-                    progress.write(error_msg)
+                    progress.update_main(1)
+                    progress.set_main_desc(f"failed: {error_msg}")
+                    self.logger.error(error_msg)
                     stats["failed"] += 1
                     stats["errors"].append(
                         {"file": file_info["title"], "error": str(e)}
                     )
-
+        finally:
+            progress.close()
         return stats
 
-    def _dry_run_migration(self, markdown_files: List[Dict]) -> Dict:
-        """Simulate migration without making changes"""
-        stats = {"successful": 0, "failed": 0, "skipped": 0, "errors": []}
+    def _dry_run_migration(
+        self, markdown_files: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Simulate migration without making changes."""
+        stats: Dict[str, Any] = {
+            "successful": 0,
+            "failed": 0,
+            "skipped": 0,
+            "errors": [],
+        }
 
         for file_info in markdown_files:
             title = file_info["title"]
@@ -173,8 +198,8 @@ class ObsidianToNotionMigrator:
 
         return stats
 
-    def _migrate_single_file(self, file_info: Dict) -> Dict:
-        """Migrate a single file to Notion"""
+    def _migrate_single_file(self, file_info: Dict[str, Any]) -> Dict[str, Any]:
+        """Migrate a single file to Notion."""
         title = file_info["title"]
 
         # Check for duplicates
@@ -214,6 +239,9 @@ class ObsidianToNotionMigrator:
             children = self._content_to_notion_blocks(converted_content)
 
             # Create page in Notion
+            # database_id was already validated in __init__
+            if self.config.notion.database_id is None:
+                raise ValueError("Database ID is required but not set")
             page = self.notion_client.create_page(
                 database_id=self.config.notion.database_id,
                 properties=properties,
@@ -228,8 +256,8 @@ class ObsidianToNotionMigrator:
         except Exception as e:
             return {"status": "failed", "error": str(e)}
 
-    def _content_to_notion_blocks(self, content: str) -> List[Dict]:
-        """Convert markdown content to Notion blocks"""
+    def _content_to_notion_blocks(self, content: str) -> List[Dict[str, Any]]:
+        """Convert markdown content to Notion blocks."""
         if not content.strip():
             return []
 
@@ -238,7 +266,7 @@ class ObsidianToNotionMigrator:
         lines = content.split("\n")
         blocks = []
 
-        current_paragraph = []
+        current_paragraph: List[str] = []
 
         for line in lines:
             line = line.strip()
@@ -273,8 +301,10 @@ class ObsidianToNotionMigrator:
 
         return blocks
 
-    def _generate_report(self, stats: Dict, vault_data: Dict) -> str:
-        """Generate migration summary report"""
+    def _generate_report(
+        self, stats: Dict[str, Any], vault_data: Dict[str, Any]
+    ) -> str:
+        """Generate migration summary report."""
         total_files = len(vault_data["markdown_files"])
         total_attachments = len(vault_data["attachments"])
 
