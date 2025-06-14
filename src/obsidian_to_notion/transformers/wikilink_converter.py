@@ -1,7 +1,13 @@
 """Convert Obsidian wikilinks to Notion links."""
 
+import logging
 import re
 from typing import Any, Dict, List, Optional
+
+from ..utils.error_handling import (
+    create_error_context,
+    log_error_with_context,
+)
 
 
 class WikilinkConverter:
@@ -20,6 +26,7 @@ class WikilinkConverter:
         self.page_mapping: Dict[str, str] = page_mapping or {}
         self.page_cache: Dict[str, str] = {}
         self.broken_links: List[str] = []
+        self.logger = logging.getLogger(__name__)
 
     def add_page_to_cache(self, title: str, page_id: str) -> None:
         """Add a page to the cache for link resolution.
@@ -45,24 +52,68 @@ class WikilinkConverter:
         """
         converted_content = content
 
-        for link_info in wikilinks:
+        for index, link_info in enumerate(wikilinks):
             note_name = link_info.get("note_name", "")
             alias = link_info.get("alias")
             section = link_info.get("section")
 
             if not note_name:
+                context = create_error_context(
+                    phase="wikilink_conversion",
+                    wikilink_index=index,
+                    wikilink_info=link_info,
+                    error_type="EmptyNoteName",
+                )
+                self.logger.warning(
+                    "Skipping wikilink with empty note_name", extra=context
+                )
                 continue
 
-            # Find the original wikilink pattern in content
-            original_link = self._find_original_link(content, note_name, alias, section)
-            if not original_link:
+            try:
+                # Find the original wikilink pattern in content
+                original_link = self._find_original_link(
+                    content, note_name, alias, section
+                )
+                if not original_link:
+                    context = create_error_context(
+                        phase="wikilink_conversion",
+                        note_name=note_name,
+                        alias=alias,
+                        section=section,
+                        wikilink_index=index,
+                        error_type="WikilinkNotFound",
+                    )
+                    self.logger.warning(
+                        f"Could not find original wikilink pattern for: {note_name}",
+                        extra=context,
+                    )
+                    continue
+
+                # Convert to Notion format
+                notion_link = self._convert_wikilink_to_notion(
+                    note_name, alias, section
+                )
+
+                # Replace in content
+                converted_content = converted_content.replace(
+                    original_link, notion_link
+                )
+
+            except Exception as e:
+                context = create_error_context(
+                    phase="wikilink_conversion",
+                    note_name=note_name,
+                    alias=alias,
+                    section=section,
+                    original_link=(
+                        original_link if "original_link" in locals() else None
+                    ),
+                    wikilink_index=index,
+                    error_type=type(e).__name__,
+                )
+                log_error_with_context(self.logger, e, context)
+                # Continue with other links even if one fails
                 continue
-
-            # Convert to Notion format
-            notion_link = self._convert_wikilink_to_notion(note_name, alias, section)
-
-            # Replace in content
-            converted_content = converted_content.replace(original_link, notion_link)
 
         return converted_content
 
@@ -203,30 +254,62 @@ class WikilinkConverter:
 
         last_end = 0
 
-        for match in re.finditer(link_pattern, content):
-            start, end = match.span()
-            display_text = match.group(1)
-            page_id = match.group(2)
+        try:
+            for match_index, match in enumerate(re.finditer(link_pattern, content)):
+                start, end = match.span()
+                display_text = match.group(1)
+                page_id = match.group(2)
 
-            # Add text before the link
-            if start > last_end:
-                text_before = content[last_end:start]
-                if text_before:
-                    rich_text.append({"type": "text", "text": {"content": text_before}})
+                # Add text before the link
+                if start > last_end:
+                    text_before = content[last_end:start]
+                    if text_before:
+                        rich_text.append(
+                            {"type": "text", "text": {"content": text_before}}
+                        )
 
-            # Add the mention
-            rich_text.append(self.create_mention_rich_text(page_id, display_text))
+                # Add the mention
+                try:
+                    rich_text.append(
+                        self.create_mention_rich_text(page_id, display_text)
+                    )
+                except Exception as e:
+                    context = create_error_context(
+                        phase="notion_link_parsing",
+                        display_text=display_text,
+                        page_id=page_id,
+                        match_index=match_index,
+                        match_position=start,
+                        error_type=type(e).__name__,
+                    )
+                    log_error_with_context(self.logger, e, context)
+                    # Fall back to plain text
+                    rich_text.append(
+                        {"type": "text", "text": {"content": f"[{display_text}]"}}
+                    )
 
-            last_end = end
+                last_end = end
 
-        # Add remaining text
-        if last_end < len(content):
-            remaining_text = content[last_end:]
-            if remaining_text:
-                rich_text.append({"type": "text", "text": {"content": remaining_text}})
+            # Add remaining text
+            if last_end < len(content):
+                remaining_text = content[last_end:]
+                if remaining_text:
+                    rich_text.append(
+                        {"type": "text", "text": {"content": remaining_text}}
+                    )
 
-        # If no links found, return the whole content as text
-        if not rich_text:
+            # If no links found, return the whole content as text
+            if not rich_text:
+                rich_text = [{"type": "text", "text": {"content": content}}]
+
+        except Exception as e:
+            context = create_error_context(
+                phase="notion_link_parsing",
+                content_length=len(content),
+                error_type=type(e).__name__,
+            )
+            log_error_with_context(self.logger, e, context)
+            # Fall back to plain text
             rich_text = [{"type": "text", "text": {"content": content}}]
 
         return rich_text

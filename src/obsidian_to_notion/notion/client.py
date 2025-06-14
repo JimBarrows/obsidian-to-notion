@@ -6,6 +6,12 @@ from typing import Any, Callable, Dict, List, Optional
 
 from notion_client import APIResponseError, Client
 
+from ..utils.error_handling import (
+    NotionAPIError,
+    create_error_context,
+    log_error_with_context,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -99,23 +105,46 @@ class NotionMigrationClient:
                 self.request_timestamps.append(time.time())
                 return result  # type: ignore[no-any-return]
             except APIResponseError as e:
+                # Extract method details for context
+                method_name = (
+                    method.__name__ if hasattr(method, "__name__") else str(method)
+                )
+
+                # Create base context
+                context = create_error_context(
+                    phase="notion_api_call",
+                    api_method=method_name,
+                    api_error_code=e.code,
+                    api_status=e.status if hasattr(e, "status") else None,
+                    retry_attempt=attempt + 1,
+                    max_retries=max_retries,
+                    kwargs=kwargs,
+                )
+
                 if e.code == "rate_limited":
                     retry_after = int(e.headers.get("retry-after", 1))
-                    logger.warning(f"Rate limited, waiting {retry_after} seconds...")
+                    context["retry_after_seconds"] = retry_after
+                    logger.warning(
+                        f"Rate limited, waiting {retry_after} seconds...", extra=context
+                    )
                     time.sleep(retry_after)
                 elif attempt == max_retries - 1:
                     enhanced_message = self._enhance_error_message(e)
-                    logger.error(
-                        f"Failed after {max_retries} attempts: {enhanced_message}"
-                    )
-                    # Just re-raise the original exception - the enhanced message
-                    # is already logged above
-                    raise
+                    context["enhanced_message"] = enhanced_message
+                    context["original_error"] = str(e)
+
+                    # Convert to our NotionAPIError and log with full context
+                    notion_error = NotionAPIError(enhanced_message)
+                    notion_error.__cause__ = e
+                    log_error_with_context(logger, notion_error, context)
+                    raise notion_error from e
                 else:
                     wait_time = 2**attempt
+                    context["wait_time_seconds"] = wait_time
                     logger.warning(
                         f"API error on attempt {attempt + 1}, "
-                        f"retrying in {wait_time}s: {e}"
+                        f"retrying in {wait_time}s: {e}",
+                        extra=context,
                     )
                     time.sleep(wait_time)
 
@@ -134,12 +163,36 @@ class NotionMigrationClient:
         Returns:
             The created page object or None if failed
         """
-        return self.rate_limited_request(
-            self.client.pages.create,
-            parent={"database_id": database_id},
-            properties=properties,
-            children=children or [],
-        )
+        try:
+            # Extract title for logging context
+            title = None
+            for _, prop_value in properties.items():
+                if isinstance(prop_value, dict) and prop_value.get("type") == "title":
+                    title_content = prop_value.get("title", [])
+                    if title_content and isinstance(title_content[0], dict):
+                        title = title_content[0].get("text", {}).get("content", "")
+                        break
+
+            return self.rate_limited_request(
+                self.client.pages.create,
+                parent={"database_id": database_id},
+                properties=properties,
+                children=children or [],
+                # Additional context for logging
+                page_title=title,
+                database_id=database_id,
+            )
+        except Exception as e:
+            # Add page creation specific context
+            context = create_error_context(
+                phase="page_creation",
+                database_id=database_id,
+                page_title=title if "title" in locals() else None,
+                has_children=bool(children),
+                num_children=len(children) if children else 0,
+            )
+            log_error_with_context(logger, e, context)
+            raise
 
     def update_page(
         self,
@@ -222,9 +275,22 @@ class NotionMigrationClient:
         # Note: The Notion API doesn't have a direct file upload endpoint
         # Files must be uploaded to external storage (S3, Cloudinary, etc.)
         # and then referenced by URL in Notion blocks
+        from pathlib import Path
+
+        file_path_obj = Path(file_path)
+        context = create_error_context(
+            phase="file_upload",
+            file_path=file_path,
+            file_name=file_path_obj.name,
+            file_exists=file_path_obj.exists(),
+            file_size=file_path_obj.stat().st_size if file_path_obj.exists() else None,
+            warning_type="NotImplemented",
+        )
+
         logger.warning(
             f"File upload not implemented. File {file_path} needs to be "
-            "uploaded to external storage and referenced by URL."
+            "uploaded to external storage and referenced by URL.",
+            extra=context,
         )
         return None
 
