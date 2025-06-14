@@ -41,6 +41,10 @@ dev = [
     "black>=21.0",
     "flake8>=3.8",
     "mypy>=1.0",
+    "ruff>=0.1.0",
+    "bandit>=1.7.0",
+    "types-PyYAML>=6.0",
+    "types-requests>=2.0",
 ]
 
 [tool.setuptools.packages.find]
