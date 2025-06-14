@@ -168,11 +168,18 @@ Beyond the universal TDD standards:
    - Run `pre-commit run --all-files` to see all issues
    - For persistent issues, fix manually or use `--no-verify` flag
 
-3. **Notion API Rate Limits**
+3. **CI/CD and Pre-commit Alignment**
+   - Pre-commit hooks are configured to match CI/CD checks exactly
+   - Both check `src/` and `tests/` directories with the same flake8 configuration
+   - Run `python scripts/validate_ci_alignment.py` to verify alignment
+   - If pre-commit passes, CI should also pass (no surprises!)
+   - The `ci-flake8-check` hook runs the exact same command as CI/CD
+
+4. **Notion API Rate Limits**
    - Default is 3 requests/second
    - Adjust `rate_limit_requests_per_second` in config if needed
 
-4. **Large Vault Processing**
+5. **Large Vault Processing**
    - Use batch_size configuration to control memory usage
    - Enable progress_bar to monitor progress
 
