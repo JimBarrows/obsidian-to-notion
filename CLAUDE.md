@@ -1,22 +1,44 @@
-# CLAUDE.md
+# CLAUDE.md - Obsidian to Notion Migration Tool
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides project-specific guidance to Claude Code when working with this repository.
+
+## Development Standards Reference
+This project follows my universal development standards documented in `~/.claude/CLAUDE.md`.
+
+### Project-Specific Overrides/Extensions
+None - this project follows all universal standards without modifications.
 
 ## Project Overview
-
 Obsidian to Notion Migration Tool - A Python utility for migrating Obsidian markdown files to Notion with support for wikilink conversion, file attachments, and deduplication.
 
-## Project Structure
+## Architecture Overview
+The tool follows a modular architecture with clear separation of concerns:
+- **Parsers**: Handle Obsidian vault processing and markdown parsing
+- **Transformers**: Convert Obsidian-specific syntax to Notion-compatible format
+- **Notion Client**: Manages API interactions with rate limiting and retry logic
+- **Migration Orchestrator**: Coordinates the entire migration process
+- **Configuration**: Dataclass-based config with YAML support and env var overrides
 
+### Technology Stack
+- Python 3.8+
+- notion-client: Official Notion API client
+- pyyaml: YAML configuration parsing
+- tqdm: Progress bar display
+- pytest: Unit testing framework
+- behave: BDD testing framework
+- black, isort, flake8, mypy, ruff: Code quality tools
+
+### Project Structure
 ```
 obsidian-to-notion/
 ├── src/obsidian_to_notion/     # Main package
-│   ├── main.py                 # CLI entry point
+│   ├── main.py                 # Migration orchestrator and CLI entry
 │   ├── config.py               # Configuration management
 │   ├── parsers/                # Obsidian parsing modules
 │   │   └── obsidian_parser.py  # Markdown and wikilink parser
 │   ├── notion/                 # Notion API integration
-│   │   └── client.py           # Notion API wrapper
+│   │   ├── client.py           # Notion API wrapper with rate limiting
+│   │   └── deduplication.py    # Duplicate detection
 │   ├── transformers/           # Content transformation
 │   │   └── wikilink_converter.py # Convert Obsidian links to Notion
 │   └── utils/                  # Utility modules
@@ -24,180 +46,136 @@ obsidian-to-notion/
 │       └── error_handling.py   # Error handling utilities
 ├── tests/                      # Test suite
 │   ├── unit/                   # Unit tests
-│   │   └── test_obsidian_parser.py
 │   └── integration/            # BDD integration tests
 │       ├── features/           # Gherkin feature files
-│       │   └── obsidian_parser.feature
 │       └── steps/              # Step definitions
-│           └── obsidian_parser_steps.py
-├── docs/                       # Documentation
+├── migrate.py                  # Simple CLI entry point
 ├── config.yaml                 # User configuration
 ├── requirements.txt            # Python dependencies
 ├── pyproject.toml             # Package metadata
 └── .env                       # Environment variables (not in git)
 ```
 
-## Key Features
+## Project-Specific Commands
 
-1. **Wikilink Conversion**: Converts `[[wikilinks]]` and `[[links|aliases]]` to Notion page mentions
-2. **Attachment Handling**: Manages embedded images and files with `![[file]]` syntax
-3. **Deduplication**: Prevents creating duplicate pages in Notion
-4. **Frontmatter Support**: Migrates YAML frontmatter as Notion properties
-5. **Progress Tracking**: Real-time progress bars using tqdm
-6. **Dry Run Mode**: Preview changes without modifying Notion
-
-## Development Workflow
-
-### Setup
+### Environment Setup
 ```bash
+# Create virtual environment
 python3 -m venv venv
-source venv/bin/activate
-pip install -e ".[test]"  # or pip install -e ".[dev]"
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install for development
+pip install -e ".[dev]"
+
+# Install for testing only
+pip install -e ".[test]"
 ```
 
-### Testing
+### Build and Test
 ```bash
-# Run unit tests
-pytest tests/unit/
-
-# Run unit tests with coverage
-pytest tests/unit/ --cov=src/obsidian_to_notion --cov-report=term-missing
-
-# Run integration tests
-cd tests/integration && behave
-
-# Run specific feature
-cd tests/integration && behave features/obsidian_parser.feature
-
 # Run all tests
 pytest tests/unit/ && cd tests/integration && behave
+
+# Unit tests with coverage
+pytest tests/unit/ --cov=src/obsidian_to_notion --cov-report=term-missing
+
+# Integration tests only
+cd tests/integration && behave
+
+# Specific feature test
+cd tests/integration && behave features/obsidian_parser.feature
+
+# Code quality checks
+black src/ tests/
+isort src/ tests/
+flake8 src/ tests/
+mypy src/
 ```
 
-### Common Commands
+### Deployment
 ```bash
-# Basic migration (uses config.yaml)
-obsidian-to-notion
+# Build distribution
+python -m build
 
-# Dry run mode
-obsidian-to-notion --dry-run
+# Install from PyPI (when published)
+pip install obsidian-to-notion
 
-# Custom config file
-obsidian-to-notion --config my-config.yaml
-
-# Override vault path
-obsidian-to-notion --vault /path/to/vault
-
-# Verbose logging
-obsidian-to-notion --verbose
-
-# Combined options
-obsidian-to-notion --vault /path/to/vault --dry-run --verbose
+# Run migration
+obsidian-to-notion --config config.yaml
 ```
 
-## Configuration System
+## Configuration
+The tool uses a hierarchical configuration system:
+1. Default values in dataclasses
+2. YAML configuration file
+3. Environment variable overrides
+4. CLI argument overrides
 
-The project uses a dataclass-based configuration system with YAML file support and environment variable overrides.
+### Required Environment Variables
+- `NOTION_TOKEN`: Notion integration token (required)
+- `NOTION_DATABASE_ID`: Target database ID (can be in config.yaml)
 
-### Configuration Structure
+### Configuration File (config.yaml)
 ```yaml
 vault:
   path: "/path/to/obsidian/vault"
 
 migration:
-  batch_size: 50              # Files per batch
-  parallel_workers: 3         # Concurrent workers
-  retry_attempts: 3          # API retry count
-  skip_duplicates: true      # Skip existing pages
-  upload_attachments: true   # Upload embedded files
-  max_file_size_mb: 5       # Max attachment size
+  batch_size: 50
+  parallel_workers: 3
+  retry_attempts: 3
+  skip_duplicates: true
+  upload_attachments: true
+  max_file_size_mb: 5
 
 notion:
-  api_url: "https://api.notion.com/v1"
-  timeout: 30                          # Request timeout
-  rate_limit_requests_per_second: 3    # API rate limit
+  database_id: "your-database-id"  # Can override with env var
+  rate_limit_requests_per_second: 3
 
 logging:
-  level: "INFO"             # Log level
-  progress_bar: true        # Show progress
-  log_file: "migration.log" # Log output file
+  level: "INFO"
+  progress_bar: true
+  log_file: "migration.log"
 ```
 
-### Environment Variables
-- `NOTION_TOKEN`: Notion integration token (required)
-- `NOTION_DATABASE_ID`: Target database ID (optional)
+## Testing Approach
+Beyond the universal TDD standards:
+- BDD scenarios cover end-to-end migration workflows
+- Unit tests achieve 100% code coverage
+- Integration tests verify Notion API interactions
+- All wikilink formats are tested comprehensively
+- Error scenarios are thoroughly covered
 
-### CLI Options
-- `--config`: Custom config file path (default: config.yaml)
-- `--vault`: Override vault path from config
-- `--dry-run`: Preview without making changes
-- `--verbose`: Enable debug logging
-
-## Architecture Notes
-
-- **Parser**: ObsidianVaultProcessor recursively scans vault directories and extracts:
-  - All markdown files with frontmatter metadata
-  - Wikilinks in all variations: `[[note]]`, `[[note|alias]]`, `[[note#section]]`, `![[embed]]`
-  - Embedded attachments (images, PDFs, documents)
-  - Creates a wikilink map for cross-reference resolution
-  - Sanitizes text for Notion compatibility
-- **Notion Client**: Wrapper around notion-client with retry logic and rate limiting support
-- **Config**: Dataclass-based configuration with YAML loading, env var overrides, and validation
-- **Error Handling**: Custom exception hierarchy for different error scenarios
-- **Progress Tracking**: tqdm-based progress bars with nested support for batch operations
-
-## Implementation Status
-
-### ✅ Completed
-- [x] Project structure and package setup
-- [x] Dataclass-based configuration system
-- [x] YAML configuration loading with validation
-- [x] Environment variable overrides
-- [x] CLI argument parsing
-- [x] Logging system with file output
-- [x] ObsidianVaultProcessor implementation:
-  - [x] Recursive vault scanning for markdown files and attachments
-  - [x] Frontmatter extraction (title, tags, date, custom metadata)
-  - [x] Comprehensive wikilink parsing (all Obsidian link formats)
-  - [x] Embedded attachment detection
-  - [x] Wikilink map creation for cross-references
-  - [x] Text sanitization for Notion compatibility
-- [x] Notion client wrapper structure
-- [x] Error handling framework
-- [x] Progress reporting utilities
-- [x] Comprehensive test suite for ObsidianVaultProcessor:
-  - [x] Unit tests with 100% code coverage
-  - [x] BDD integration tests using Behave/Gherkin
-  - [x] Tests for all wikilink formats, frontmatter extraction, sanitization
-  - [x] Error handling and edge case testing
-- [x] NotionMigrationClient implementation:
-  - [x] Automatic rate limiting (configurable requests per second)
-  - [x] Retry logic with exponential backoff
-  - [x] Support for rate limit headers from Notion API
-  - [x] Page creation, update, and querying methods
-  - [x] Database pagination handling
-  - [x] File upload placeholder (needs external storage integration)
-- [x] DeduplicationManager implementation:
-  - [x] Load and index existing pages from Notion database
-  - [x] Case-insensitive duplicate detection
-  - [x] Extract titles from various Notion property names
-- [x] Comprehensive test suite for Notion client:
-  - [x] Unit tests with 100% coverage
-  - [x] BDD integration tests for all scenarios
-  - [x] Rate limiting, retry, and error handling tests
-
-### 🚧 In Progress
-- [ ] Main migration logic implementation
+## Current Implementation Status
+- [x] Core architecture and configuration system
+- [x] Obsidian vault parsing with wikilink extraction
+- [x] Notion API client with rate limiting
+- [x] Deduplication management
+- [x] Main migration orchestrator
 - [ ] Wikilink to Notion page resolution
-- [ ] Batch processing implementation
-
-### 📋 TODO
-- [ ] File attachment upload (S3/Cloudinary integration)
-- [ ] Support for Obsidian plugins syntax
+- [ ] Batch processing for large vaults
+- [ ] File attachment upload integration
 - [ ] Progress persistence for resumable migrations
-- [ ] Rollback capability for failed migrations
 
-## Current Limitations
+## Troubleshooting
+### Common Issues
 
-1. **File Uploads**: Notion API doesn't support direct file uploads - needs external hosting
-2. **Large Vaults**: Batch configuration exists but processing logic not implemented
-3. **Complex Formatting**: Some Obsidian plugins' syntax not supported
+1. **Import Sorting Conflicts**
+   - isort and ruff may have different requirements
+   - Solution: Use ruff's format as it's the final check
+
+2. **Pre-commit Hook Failures**
+   - Run `pre-commit run --all-files` to see all issues
+   - For persistent issues, fix manually or use `--no-verify` flag
+
+3. **Notion API Rate Limits**
+   - Default is 3 requests/second
+   - Adjust `rate_limit_requests_per_second` in config if needed
+
+4. **Large Vault Processing**
+   - Use batch_size configuration to control memory usage
+   - Enable progress_bar to monitor progress
+
+---
+
+**Note**: For universal development workflow, see `~/.claude/CLAUDE.md`. Use the command `/start-feature {issue-number}` to begin feature development following standard workflow.
