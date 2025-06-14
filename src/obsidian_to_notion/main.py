@@ -4,50 +4,13 @@
 import argparse
 import logging
 import sys
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from .config import AppConfig
 from .notion import DeduplicationManager, NotionMigrationClient
 from .parsers import ObsidianVaultProcessor
+from .transformers import WikilinkConverter
 from .utils import MigrationError, ProgressTracker
-
-
-class WikilinkConverter:
-    """Wrapper for WikilinkConverter with additional functionality."""
-
-    def __init__(self, page_mapping: Optional[Dict[str, str]] = None) -> None:
-        """Initialize WikilinkConverter with optional page mapping."""
-        self.page_mapping: Dict[str, str] = page_mapping or {}
-        self.page_cache: Dict[str, str] = {}
-        self.broken_links: List[str] = []
-
-    def add_page_to_cache(self, title: str, page_id: str) -> None:
-        """Add a page to the cache for link resolution."""
-        self.page_cache[title.lower()] = page_id
-        self.page_mapping[title] = page_id
-
-    def convert_content(self, content: str, wikilinks: List[Dict]) -> str:
-        """Convert wikilinks in content."""
-        # For simple implementation, just return content as-is
-        # In a full implementation, this would parse and convert wikilinks
-        result = content
-        for link in wikilinks:
-            if link.get("note_name"):
-                note_name = link["note_name"]
-                if note_name.lower() in self.page_cache:
-                    # Replace with Notion link (simplified)
-                    pass
-                else:
-                    self.broken_links.append(note_name)
-        return result
-
-    def get_broken_links_report(self) -> str:
-        """Get report of broken links."""
-        if not self.broken_links:
-            return "No broken links found"
-        return f"Found {len(self.broken_links)} broken links: " + ", ".join(
-            self.broken_links
-        )
 
 
 class ObsidianToNotionMigrator:
