@@ -11,6 +11,11 @@ from .notion import DeduplicationManager, NotionMigrationClient
 from .parsers import ObsidianVaultProcessor
 from .transformers import WikilinkConverter
 from .utils import MigrationError, ProgressTracker
+from .utils.error_handling import (
+    create_error_context,
+    log_error_with_context,
+    setup_error_handling,
+)
 
 
 class ObsidianToNotionMigrator:
@@ -42,6 +47,9 @@ class ObsidianToNotionMigrator:
             ],
         )
         self.logger = logging.getLogger(__name__)
+
+        # Setup enhanced error handling
+        setup_error_handling()
 
     def migrate(self, dry_run: bool = False) -> Dict[str, Any]:
         """Execute complete migration process."""
@@ -77,8 +85,16 @@ class ObsidianToNotionMigrator:
             return {"status": "completed", "stats": migration_stats, "report": report}
 
         except Exception as e:
-            self.logger.error(f"Migration failed: {e}")
-            raise MigrationError(f"Migration failed: {e}") from e
+            context = create_error_context(
+                phase="migration_orchestration",
+                vault_path=self.config.vault.path,
+                database_id=self.config.notion.database_id,
+                dry_run=dry_run,
+                error_type=type(e).__name__,
+            )
+            migration_error = MigrationError(f"Migration failed: {e}")
+            log_error_with_context(self.logger, migration_error, context)
+            raise migration_error from e
 
     def _execute_migration(
         self, markdown_files: List[Dict[str, Any]]
@@ -123,10 +139,24 @@ class ObsidianToNotionMigrator:
                     # Progress reporter doesn't have set_postfix method
 
                 except Exception as e:
+                    context = create_error_context(
+                        phase="file_migration",
+                        file_path=str(file_info.get("path", "")),
+                        file_title=file_info["title"],
+                        file_index=markdown_files.index(file_info),
+                        total_files=len(markdown_files),
+                        error_type=type(e).__name__,
+                        stats_so_far={
+                            "successful": stats["successful"],
+                            "failed": stats["failed"],
+                            "skipped": stats["skipped"],
+                        },
+                    )
+                    log_error_with_context(self.logger, e, context)
+
                     error_msg = f"Error migrating {file_info['title']}: {e}"
                     progress.update_main(1)
                     progress.set_main_desc(f"failed: {error_msg}")
-                    self.logger.error(error_msg)
                     stats["failed"] += 1
                     stats["errors"].append(
                         {"file": file_info["title"], "error": str(e)}
@@ -217,6 +247,16 @@ class ObsidianToNotionMigrator:
                 return {"status": "failed", "error": "Failed to create page"}
 
         except Exception as e:
+            context = create_error_context(
+                phase="single_file_migration",
+                file_path=str(file_info.get("path", "")),
+                file_title=title,
+                has_wikilinks=bool(file_info.get("wikilinks")),
+                num_wikilinks=len(file_info.get("wikilinks", [])),
+                has_metadata=bool(file_info.get("metadata")),
+                error_type=type(e).__name__,
+            )
+            log_error_with_context(self.logger, e, context)
             return {"status": "failed", "error": str(e)}
 
     def _content_to_notion_blocks(self, content: str) -> List[Dict[str, Any]]:
@@ -337,6 +377,9 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+
+    # Set up enhanced error handling early
+    setup_error_handling()
 
     try:
         # Load configuration

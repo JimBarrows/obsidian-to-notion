@@ -8,6 +8,11 @@ from typing import Dict, List, Optional, Tuple
 import frontmatter  # type: ignore[import-untyped]
 import yaml
 
+from ..utils.error_handling import (
+    create_error_context,
+    log_error_with_context,
+)
+
 
 class ObsidianVaultProcessor:
     """Process Obsidian vault and extract all content."""
@@ -36,7 +41,14 @@ class ObsidianVaultProcessor:
         print(f"Processing vault at: {self.vault_path}")
 
         if not self.vault_path.exists():
-            raise FileNotFoundError(f"Vault path does not exist: {self.vault_path}")
+            error = FileNotFoundError(f"Vault path does not exist: {self.vault_path}")
+            context = create_error_context(
+                file_path=self.vault_path,
+                phase="vault_validation",
+                vault_path=str(self.vault_path),
+            )
+            log_error_with_context(self.logger, error, context)
+            raise error
 
         for file_path in self.vault_path.rglob("*"):
             if file_path.suffix == ".md":
@@ -206,9 +218,17 @@ class ObsidianVaultProcessor:
             except Exception as e:
                 if error_recovery:
                     # Attempt manual parsing with error recovery
+                    context = create_error_context(
+                        file_path=file_path,
+                        phase="frontmatter_parsing",
+                        error_type="FrontmatterParseError",
+                        vault_path=str(self.vault_path),
+                        relative_path=str(file_path.relative_to(self.vault_path)),
+                    )
                     self.logger.warning(
                         f"Standard frontmatter parsing failed for {file_path}: {e}. "
-                        "Attempting error recovery..."
+                        "Attempting error recovery...",
+                        extra=context,
                     )
                     yaml_text, markdown_content = self._extract_yaml_content_split(
                         content
@@ -253,7 +273,24 @@ class ObsidianVaultProcessor:
             return file_info
 
         except Exception as e:
-            self.logger.error(f"Error processing {file_path}: {e}")
+            # Create comprehensive error context
+            context = create_error_context(
+                file_path=file_path,
+                phase="file_processing",
+                vault_path=str(self.vault_path),
+                relative_path=str(file_path.relative_to(self.vault_path)),
+                error_type=type(e).__name__,
+            )
+
+            # Add file metadata if available
+            try:
+                stat = file_path.stat()
+                context["file_size_bytes"] = stat.st_size
+                context["file_modified"] = stat.st_mtime
+            except Exception:
+                pass  # nosec B110
+
+            log_error_with_context(self.logger, e, context)
 
             # If error recovery is enabled, try to at least get the content
             if error_recovery:
@@ -278,8 +315,16 @@ class ObsidianVaultProcessor:
                         "relative_path": file_path.relative_to(self.vault_path),
                     }
                 except Exception as recovery_error:
-                    self.logger.error(
-                        f"Error recovery also failed for {file_path}: {recovery_error}"
+                    recovery_context = create_error_context(
+                        file_path=file_path,
+                        phase="error_recovery",
+                        vault_path=str(self.vault_path),
+                        relative_path=str(file_path.relative_to(self.vault_path)),
+                        original_error=str(e),
+                        recovery_error_type=type(recovery_error).__name__,
+                    )
+                    log_error_with_context(
+                        self.logger, recovery_error, recovery_context
                     )
 
             return None
