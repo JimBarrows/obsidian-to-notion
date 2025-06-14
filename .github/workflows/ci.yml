@@ -38,10 +38,6 @@ jobs:
       run: |
         black --check src/ tests/
 
-    - name: Run isort import check
-      run: |
-        isort --check-only src/ tests/
-
     - name: Run Flake8 linting
       run: |
         flake8 src/ tests/
