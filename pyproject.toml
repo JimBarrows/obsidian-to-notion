@@ -35,6 +35,12 @@ classifiers = [
 obsidian-to-notion = "src.obsidian_to_notion.main:main"
 
 [project.optional-dependencies]
+test = [
+    "pytest>=6.0",
+    "pytest-cov>=2.10",
+    "coverage>=7.0",
+    "behave>=1.2.6",
+]
 dev = [
     "pytest>=6.0",
     "pytest-cov>=2.10",
@@ -46,6 +52,7 @@ dev = [
     "coverage>=7.0",
     "types-PyYAML>=6.0",
     "types-requests>=2.0",
+    "behave>=1.2.6",
 ]
 
 [tool.setuptools.packages.find]
