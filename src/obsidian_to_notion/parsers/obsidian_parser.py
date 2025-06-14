@@ -89,25 +89,25 @@ class ObsidianVaultProcessor:
         # Replace tabs with spaces
         yaml_text = yaml_text.replace("\t", "  ")
 
-        # Fix missing space after colon (but not in URLs)
+        # Fix missing space after colon in key:value pairs
         lines = yaml_text.split("\n")
         fixed_lines = []
         for line in lines:
-            # Skip lines that look like URLs or markdown links
-            if "http://" in line or "https://" in line or "](" in line:
-                fixed_lines.append(line)
-                continue
-
             # Fix missing space after colon in key:value pairs
-            # Match characters followed by colon and non-space (but exclude URLs)
+            # Match key followed by colon and non-space character
             match = re.match(r"^(\s*)([^:]+):(\S.*)$", line)
             if match:
                 indent, key, value = match.groups()
-                # Don't fix URLs or markdown links
-                if not ("http://" in line or "https://" in line or "](" in line):
+                # Check if the value part contains URLs - preserve URL structure
+                if "://" in value:
+                    # For URLs, just add space after key colon but preserve URL colons
+                    fixed_lines.append(f"{indent}{key}: {value}")
+                elif "](" in line:
+                    # For markdown links, preserve structure
                     fixed_lines.append(f"{indent}{key}: {value}")
                 else:
-                    fixed_lines.append(line)
+                    # Regular key:value pair, add space
+                    fixed_lines.append(f"{indent}{key}: {value}")
             else:
                 fixed_lines.append(line)
 
@@ -217,14 +217,18 @@ class ObsidianVaultProcessor:
 
         # First attempt: Parse as-is
         try:
-            return yaml.safe_load(yaml_text) or {}
+            result = yaml.safe_load(yaml_text)
+            if isinstance(result, dict):
+                return result
         except yaml.YAMLError:
             pass
 
         # Second attempt: Fix common errors
         try:
             fixed_yaml = self._fix_yaml_common_errors(yaml_text)
-            return yaml.safe_load(fixed_yaml) or {}
+            result = yaml.safe_load(fixed_yaml)
+            if isinstance(result, dict):
+                return result
         except yaml.YAMLError:
             pass
 
@@ -233,7 +237,9 @@ class ObsidianVaultProcessor:
             # Replace {{placeholder}} with quoted empty string for YAML compatibility
             cleaned_yaml = re.sub(r"\{\{[^}]+\}\}", '""', yaml_text)
             cleaned_yaml = self._fix_yaml_common_errors(cleaned_yaml)
-            return yaml.safe_load(cleaned_yaml) or {}
+            result = yaml.safe_load(cleaned_yaml)
+            if isinstance(result, dict):
+                return result
         except yaml.YAMLError:
             pass
 
@@ -244,17 +250,22 @@ class ObsidianVaultProcessor:
             fixed_yaml = self._fix_yaml_common_errors(fixed_yaml)
             # Also remove template placeholders
             fixed_yaml = re.sub(r"\{\{[^}]+\}\}", '""', fixed_yaml)
-            return yaml.safe_load(fixed_yaml) or {}
+            result = yaml.safe_load(fixed_yaml)
+            if isinstance(result, dict):
+                return result
         except yaml.YAMLError:
             pass
 
-        # Fifth attempt: Extract simple key-value pairs
+        # Fifth attempt: Extract simple key-value pairs (even with malformed spacing)
         metadata = {}
         for line in yaml_text.split("\n"):
-            # Match simple key: value pattern
-            match = re.match(r"^([^:]+):\s*(.+)$", line.strip())
+            # Match key:value pattern (with or without space after colon)
+            match = re.match(r"^([^:]+):\s*(.*)$", line.strip())
             if match:
                 key, value = match.groups()
+                # Skip empty values
+                if not value.strip():
+                    continue
                 # Skip lines with template syntax, wiki links, or markdown links
                 has_template = "{{" in value
                 has_wikilink = "[[" in key or "[[" in value
