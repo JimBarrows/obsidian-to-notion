@@ -5,10 +5,10 @@ notion:
   # Parent page ID where imported pages will be created
   # Can be overridden by NOTION_PARENT_PAGE_ID environment variable
   parent_page_id: ""
-  
+
   # Maximum number of retries for API requests
   max_retries: 3
-  
+
   # Number of pages to process in batch
   batch_size: 10
 
@@ -20,7 +20,7 @@ obsidian:
     - ".trash/"
     - "_templates/"
     - "_archive/"
-  
+
   # File extensions considered as attachments
   attachment_extensions:
     - .png
@@ -39,16 +39,16 @@ migration:
   # How to handle duplicate pages in Notion
   # Options: skip, update, create_new
   duplicate_handling: skip
-  
+
   # Whether to migrate tags as Notion labels
   migrate_tags: true
-  
+
   # Whether to migrate frontmatter as page properties
   migrate_frontmatter: true
-  
+
   # Whether to preserve folder structure as nested pages
   preserve_folder_structure: true
-  
+
   # Maximum depth for nested pages (0 = unlimited)
   max_nesting_depth: 0
 
@@ -56,10 +56,10 @@ migration:
 advanced:
   # Whether to convert wikilinks to Notion page mentions
   convert_wikilinks: true
-  
+
   # Whether to upload attachments (requires external hosting)
   upload_attachments: false
-  
+
   # External file hosting settings (if upload_attachments is true)
   file_hosting:
     # Options: s3, cloudinary, local_server

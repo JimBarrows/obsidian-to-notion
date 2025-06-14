@@ -53,6 +53,7 @@ dev = [
     "types-PyYAML>=6.0",
     "types-requests>=2.0",
     "behave>=1.2.6",
+    "pre-commit>=3.0.0",
 ]
 
 [tool.setuptools.packages.find]
