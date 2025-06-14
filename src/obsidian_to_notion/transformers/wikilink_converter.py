@@ -1,117 +1,232 @@
 """Convert Obsidian wikilinks to Notion links."""
 
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+import re
+from typing import Any, Dict, List, Optional
 
 
 class WikilinkConverter:
-    """Convert Obsidian wikilinks to Notion-compatible links."""
+    """Convert Obsidian wikilinks to Notion-compatible links.
 
-    def __init__(self, page_mapping: Dict[str, str]):
-        """Initialize converter with page mapping.
+    This class provides functionality to convert Obsidian-style wikilinks
+    ([[page]] and [[page|alias]]) to Notion page mentions or fallback text.
+    """
+
+    def __init__(self, page_mapping: Optional[Dict[str, str]] = None) -> None:
+        """Initialize WikilinkConverter with optional page mapping.
 
         Args:
-            page_mapping: Dictionary mapping Obsidian file paths to Notion page IDs
+            page_mapping: Dictionary mapping page titles to Notion page IDs
         """
-        self.page_mapping = page_mapping
+        self.page_mapping: Dict[str, str] = page_mapping or {}
+        self.page_cache: Dict[str, str] = {}
+        self.broken_links: List[str] = []
 
-    def convert_content(
-        self, content: str, links: List[Tuple[str, str]], current_file: Path
-    ) -> str:
+    def add_page_to_cache(self, title: str, page_id: str) -> None:
+        """Add a page to the cache for link resolution.
+
+        Args:
+            title: Page title
+            page_id: Notion page ID
+        """
+        normalized_title = title.lower().strip()
+        self.page_cache[normalized_title] = page_id
+        self.page_mapping[title] = page_id
+
+    def convert_content(self, content: str, wikilinks: List[Dict[str, Any]]) -> str:
         """Convert wikilinks in content to Notion links.
 
         Args:
             content: Original markdown content
-            links: List of (full_match, link_text) tuples
-            current_file: Path of the current file being processed
+            wikilinks: List of wikilink dictionaries with 'note_name' and optional
+                'alias'
 
         Returns:
             Content with converted links
         """
-        converted = content
+        converted_content = content
 
-        for full_match, link_text in links:
-            notion_link = self.convert_wikilink(link_text, current_file)
-            if notion_link:
-                converted = converted.replace(full_match, notion_link)
+        for link_info in wikilinks:
+            note_name = link_info.get("note_name", "")
+            alias = link_info.get("alias")
+            section = link_info.get("section")
 
-        return converted
+            if not note_name:
+                continue
 
-    def convert_wikilink(self, link_text: str, current_file: Path) -> Optional[str]:
+            # Find the original wikilink pattern in content
+            original_link = self._find_original_link(content, note_name, alias, section)
+            if not original_link:
+                continue
+
+            # Convert to Notion format
+            notion_link = self._convert_wikilink_to_notion(note_name, alias, section)
+
+            # Replace in content
+            converted_content = converted_content.replace(original_link, notion_link)
+
+        return converted_content
+
+    def _find_original_link(
+        self,
+        content: str,
+        note_name: str,
+        alias: Optional[str] = None,
+        section: Optional[str] = None,
+    ) -> Optional[str]:
+        """Find the original wikilink pattern in content.
+
+        Args:
+            content: Content to search in
+            note_name: Note name from wikilink
+            alias: Optional alias
+            section: Optional section reference
+
+        Returns:
+            Original wikilink string if found
+        """
+        # Build possible patterns
+        patterns = []
+
+        if alias:
+            if section:
+                patterns.append(f"[[{note_name}#{section}|{alias}]]")
+            patterns.append(f"[[{note_name}|{alias}]]")
+
+        if section:
+            patterns.append(f"[[{note_name}#{section}]]")
+
+        patterns.append(f"[[{note_name}]]")
+
+        # Check each pattern
+        for pattern in patterns:
+            if pattern in content:
+                return pattern
+
+        return None
+
+    def _convert_wikilink_to_notion(
+        self, note_name: str, alias: Optional[str] = None, section: Optional[str] = None
+    ) -> str:
         """Convert a single wikilink to Notion format.
 
         Args:
-            link_text: Text inside the wikilink
-            current_file: Path of the file containing the link
+            note_name: Name of the note being linked to
+            alias: Optional display alias
+            section: Optional section reference
 
         Returns:
-            Notion-formatted link or None if target not found
+            Notion-formatted link or fallback text
         """
-        # Parse link components
-        alias = None
-        section = None
+        normalized_name = note_name.lower().strip()
+        display_text = alias or note_name
 
-        # Handle aliases
-        if "|" in link_text:
-            link_path, alias = link_text.split("|", 1)
+        # Add section to display text if present
+        if section and not alias:
+            display_text = f"{note_name}#{section}"
+        elif section and alias:
+            display_text = f"{alias} (#{section})"
+
+        # Check if we have a Notion page ID for this note
+        page_id = self.page_cache.get(normalized_name) or self.page_mapping.get(
+            note_name
+        )
+
+        if page_id:
+            # Create Notion page mention link
+            # Note: This creates a markdown link that can be converted to Notion blocks
+            return f"[{display_text}](@{page_id})"
         else:
-            link_path = link_text
+            # Track broken link
+            broken_link = f"{note_name}#{section}" if section else note_name
+            if broken_link not in self.broken_links:
+                self.broken_links.append(broken_link)
 
-        # Handle section links
-        if "#" in link_path:
-            parts = link_path.split("#", 1)
-            link_path = parts[0]
-            section = parts[1] if len(parts) > 1 else None
+            # Return as plain text with indicator
+            return f"{display_text} (link not found)"
 
-        # Determine display text
-        display_text = alias or link_path or current_file.stem
-
-        # If it's a same-file section link
-        if not link_path:
-            # For now, just return the display text
-            # TODO: Handle section anchors when Notion API supports them
-            return f"[{display_text}](#{section})" if section else display_text
-
-        # Look up Notion page ID
-        notion_page_id = self.page_mapping.get(link_path)
-        if not notion_page_id:
-            # Return as plain text if page not found
-            return f"{display_text} (page not found)"
-
-        # Format as Notion mention
-        return self.format_notion_mention(notion_page_id, display_text)
-
-    def format_notion_mention(self, page_id: str, display_text: str) -> str:
-        """Format a Notion page mention.
-
-        Args:
-            page_id: Notion page ID
-            display_text: Text to display
+    def get_broken_links_report(self) -> str:
+        """Get report of broken links found during conversion.
 
         Returns:
-            Formatted mention
+            Human-readable report of broken links
         """
-        # Notion uses a special format for page mentions in markdown
-        # For API, we'll need to use block format
-        return f"[{display_text}](notion://www.notion.so/{page_id.replace('-', '')})"
+        if not self.broken_links:
+            return "No broken links found"
 
-    def create_mention_block(self, page_id: str) -> Dict:
-        """Create a Notion mention block.
+        report_lines = [f"Found {len(self.broken_links)} broken links:", ""]
+
+        for link in sorted(set(self.broken_links)):
+            report_lines.append(f"  - {link}")
+
+        return "\n".join(report_lines)
+
+    def create_mention_rich_text(
+        self, page_id: str, display_text: str
+    ) -> Dict[str, Any]:
+        """Create a Notion rich text mention object.
 
         Args:
             page_id: Notion page ID to mention
+            display_text: Text to display for the mention
 
         Returns:
-            Notion block object
+            Notion rich text mention object
         """
         return {
-            "type": "paragraph",
-            "paragraph": {
-                "rich_text": [
-                    {
-                        "type": "mention",
-                        "mention": {"type": "page", "page": {"id": page_id}},
-                    }
-                ]
+            "type": "mention",
+            "mention": {"type": "page", "page": {"id": page_id}},
+            "annotations": {
+                "bold": False,
+                "italic": False,
+                "strikethrough": False,
+                "underline": False,
+                "code": False,
+                "color": "default",
             },
+            "plain_text": display_text,
+            "href": f"https://www.notion.so/{page_id.replace('-', '')}",
         }
+
+    def parse_notion_link_from_content(self, content: str) -> List[Dict[str, Any]]:
+        """Parse converted Notion links from content to create rich text objects.
+
+        Args:
+            content: Content containing converted Notion links
+
+        Returns:
+            List of rich text objects for Notion API
+        """
+        rich_text = []
+
+        # Pattern to match our converted links: [display_text](@page_id)
+        link_pattern = r"\[([^\]]+)\]\(@([^)]+)\)"
+
+        last_end = 0
+
+        for match in re.finditer(link_pattern, content):
+            start, end = match.span()
+            display_text = match.group(1)
+            page_id = match.group(2)
+
+            # Add text before the link
+            if start > last_end:
+                text_before = content[last_end:start]
+                if text_before:
+                    rich_text.append({"type": "text", "text": {"content": text_before}})
+
+            # Add the mention
+            rich_text.append(self.create_mention_rich_text(page_id, display_text))
+
+            last_end = end
+
+        # Add remaining text
+        if last_end < len(content):
+            remaining_text = content[last_end:]
+            if remaining_text:
+                rich_text.append({"type": "text", "text": {"content": remaining_text}})
+
+        # If no links found, return the whole content as text
+        if not rich_text:
+            rich_text = [{"type": "text", "text": {"content": content}}]
+
+        return rich_text
