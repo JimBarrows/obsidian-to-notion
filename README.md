@@ -5,7 +5,7 @@ A Python utility to migrate Obsidian markdown files to Notion databases, handlin
 ## Setup
 
 1. Clone/download this project
-2. Create virtual environment: `python -m venv .venv`
+2. Create virtual environment: `python3 -m venv .venv`
 3. Activate it: `source .venv/bin/activate` (Linux/Mac) or `.venv\Scripts\activate` (Windows)
 4. Install dependencies: `pip install -r requirements.txt`
 5. Copy `.env.example` to `.env` and fill in your Notion API credentials
@@ -15,13 +15,13 @@ A Python utility to migrate Obsidian markdown files to Notion databases, handlin
 
 ```bash
 # Dry run to see what would be migrated
-python migrate.py --dry-run
+python3 migrate.py --dry-run
 
 # Actual migration
-python migrate.py
+python3 migrate.py
 
 # Custom config file
-python migrate.py --config my-config.yaml
+python3 migrate.py --config my-config.yaml
 ```
 
 ## Configuration
