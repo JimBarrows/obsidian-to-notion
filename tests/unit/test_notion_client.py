@@ -5,6 +5,7 @@ from unittest.mock import Mock, call, patch
 
 import pytest
 from notion_client import APIResponseError
+
 from obsidian_to_notion.notion import DeduplicationManager, NotionMigrationClient
 
 

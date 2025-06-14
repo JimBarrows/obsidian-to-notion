@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
+
 from obsidian_to_notion.config import AppConfig
 from obsidian_to_notion.main import ObsidianToNotionMigrator, main, setup_logging
 from obsidian_to_notion.utils.error_handling import MigrationError

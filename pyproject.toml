@@ -98,13 +98,15 @@ exclude_lines = [
 precision = 2
 fail_under = 80
 
-[tool.isort]
-profile = "black"
-line_length = 88
+# [tool.isort] - Deprecated: Using ruff for import sorting
+# profile = "black"
+# line_length = 88
 
 [tool.ruff]
 line-length = 88
 target-version = "py38"
+
+[tool.ruff.lint]
 select = [
     "E",  # pycodestyle errors
     "W",  # pycodestyle warnings
@@ -115,3 +117,6 @@ select = [
     "UP", # pyupgrade
 ]
 ignore = ["E203"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["obsidian_to_notion"]

@@ -5,6 +5,7 @@ import tempfile
 from unittest.mock import Mock, patch
 
 from behave import given, then, when
+
 from obsidian_to_notion.config import (
     AppConfig,
     LoggingConfig,
