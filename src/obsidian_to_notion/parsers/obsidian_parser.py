@@ -99,11 +99,70 @@ class ObsidianVaultProcessor:
                 continue
 
             # Fix missing space after colon in key:value pairs
-            # Match word characters followed by colon and non-space
-            match = re.match(r"^(\s*)([^:\s]+):(\S.*)$", line)
+            # Match characters followed by colon and non-space (but exclude URLs)
+            match = re.match(r"^(\s*)([^:]+):(\S.*)$", line)
             if match:
                 indent, key, value = match.groups()
-                fixed_lines.append(f"{indent}{key}: {value}")
+                # Don't fix URLs or markdown links
+                if not ("http://" in line or "https://" in line or "](" in line):
+                    fixed_lines.append(f"{indent}{key}: {value}")
+                else:
+                    fixed_lines.append(line)
+            else:
+                fixed_lines.append(line)
+
+        return "\n".join(fixed_lines)
+
+    def _quote_problematic_yaml_values(self, yaml_text: str) -> str:
+        """Quote YAML values that contain problematic characters.
+
+        Args:
+            yaml_text: Raw YAML text
+
+        Returns:
+            YAML text with quoted problematic values
+        """
+        lines = yaml_text.split("\n")
+        fixed_lines = []
+
+        for line in lines:
+            # Skip empty lines or lines that don't look like key-value pairs
+            if not line.strip() or ":" not in line:
+                fixed_lines.append(line)
+                continue
+
+            # Split on first colon to separate key and value
+            parts = line.split(":", 1)
+            if len(parts) != 2:
+                fixed_lines.append(line)
+                continue
+
+            key, value = parts
+            value = value.strip()
+
+            # Skip if already quoted or empty
+            is_quoted = (value.startswith('"') and value.endswith('"')) or (
+                value.startswith("'") and value.endswith("'")
+            )
+            if not value or is_quoted:
+                fixed_lines.append(line)
+                continue
+
+            # Quote values that contain unescaped colons or look like URLs
+            should_quote = False
+            if ":" in value and not value.startswith("[") and not value.startswith("-"):
+                # Quote values with colons unless they are already quoted
+                should_quote = True
+            elif (
+                ("http://" in value or "https://" in value or "://" in value)
+                and not value.startswith('"')
+                and not value.startswith("'")
+            ):
+                # Quote URL values to prevent YAML parsing issues
+                should_quote = True
+
+            if should_quote:
+                fixed_lines.append(f"{key}: '{value}'")
             else:
                 fixed_lines.append(line)
 
@@ -142,7 +201,7 @@ class ObsidianVaultProcessor:
         else:
             return "", content
 
-        return yaml_text.strip(), markdown_content.strip()
+        return yaml_text.strip(), markdown_content.lstrip()
 
     def _parse_yaml_with_recovery(self, yaml_text: str) -> Dict:
         """Parse YAML with error recovery.
@@ -169,25 +228,43 @@ class ObsidianVaultProcessor:
         except yaml.YAMLError:
             pass
 
-        # Third attempt: Remove template placeholders
+        # Third attempt: Remove template placeholders and fix common errors
         try:
-            # Replace {{placeholder}} with empty string
+            # Replace {{placeholder}} with quoted empty string for YAML compatibility
             cleaned_yaml = re.sub(r"\{\{[^}]+\}\}", '""', yaml_text)
             cleaned_yaml = self._fix_yaml_common_errors(cleaned_yaml)
             return yaml.safe_load(cleaned_yaml) or {}
         except yaml.YAMLError:
             pass
 
-        # Fourth attempt: Extract simple key-value pairs
+        # Fourth attempt: Quote problematic values
+        try:
+            # Quote values that contain special characters like colons
+            fixed_yaml = self._quote_problematic_yaml_values(yaml_text)
+            fixed_yaml = self._fix_yaml_common_errors(fixed_yaml)
+            # Also remove template placeholders
+            fixed_yaml = re.sub(r"\{\{[^}]+\}\}", '""', fixed_yaml)
+            return yaml.safe_load(fixed_yaml) or {}
+        except yaml.YAMLError:
+            pass
+
+        # Fifth attempt: Extract simple key-value pairs
         metadata = {}
         for line in yaml_text.split("\n"):
             # Match simple key: value pattern
             match = re.match(r"^([^:]+):\s*(.+)$", line.strip())
             if match:
                 key, value = match.groups()
-                # Skip lines with template syntax or other issues
-                if "{{" not in value and "[[" not in key:
-                    metadata[key.strip()] = value.strip()
+                # Skip lines with template syntax, wiki links, or markdown links
+                has_template = "{{" in value
+                has_wikilink = "[[" in key or "[[" in value
+                has_markdown_link = re.search(r"\[.*?\]\(.*?\)", value)
+                if not (has_template or has_wikilink or has_markdown_link):
+                    # Clean the value of problematic characters for simple extraction
+                    cleaned_value = value.strip()
+                    # Skip values that look like they would break YAML
+                    if not any(char in cleaned_value for char in ["{", "}", "[", "]"]):
+                        metadata[key.strip()] = cleaned_value
 
         return metadata
 
