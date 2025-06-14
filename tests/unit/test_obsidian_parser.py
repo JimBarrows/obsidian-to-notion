@@ -533,13 +533,13 @@ class TestYAMLParsingMethods(unittest.TestCase):
         self.assertIn("employees: 7000", fixed)
 
     def test_fix_yaml_common_errors_preserves_urls(self):
-        """Test that URLs are not modified."""
+        """Test that URL structure is preserved while fixing key:value spacing."""
         yaml_text = "url:https://docs.example.org/en/use/content\nother:value"
         fixed = self.processor._fix_yaml_common_errors(yaml_text)
 
-        # URL should not have space added after colon
-        self.assertIn("url:https://docs.example.org/en/use/content", fixed)
-        # But normal field should have space added
+        # Key-value separator should have space, but URL structure preserved
+        self.assertIn("url: https://docs.example.org/en/use/content", fixed)
+        # Normal field should also have space added
         self.assertIn("other: value", fixed)
 
     def test_fix_yaml_errors_preserves_markdown_links(self):
@@ -692,6 +692,76 @@ class TestYAMLParsingMethods(unittest.TestCase):
         # Should skip lines with problematic syntax
         self.assertNotIn("broken", result)
         self.assertNotIn("author", result)  # Contains [[ ]]
+
+    def test_parse_yaml_with_recovery_specific_obsidian_errors(self):
+        """Test specific YAML errors seen in Obsidian vault logs."""
+        # Test case 1: Template placeholder causing "found unhashable key" error
+        yaml_text1 = "author: {{author}}\ntitle: Test Title"
+        result1 = self.processor._parse_yaml_with_recovery(yaml_text1)
+        self.assertEqual(result1["title"], "Test Title")
+        # Template should be replaced with empty string
+        self.assertEqual(result1["author"], "")
+
+        # Test case 2: Markdown link in YAML causing parsing issues
+        yaml_text2 = (
+            "author: [dev@nifi.apache.org](mailto:dev@nifi.apache.org)\n"
+            "title: Apache NiFi"
+        )
+        result2 = self.processor._parse_yaml_with_recovery(yaml_text2)
+        self.assertEqual(result2["title"], "Apache NiFi")
+        # Markdown link should be handled gracefully
+
+        # Test case 3: Missing space after colon
+        yaml_text3 = "business name:Copart\nIn contacts:No\ntitle: Company Info"
+        result3 = self.processor._parse_yaml_with_recovery(yaml_text3)
+        self.assertEqual(result3["title"], "Company Info")
+        # The fix should handle missing spaces after colons
+
+        # Test case 4: Tab characters in YAML
+        yaml_text4 = "attendees:\n\t- [[Robert Turnbull]]\ntitle: Meeting Notes"
+        result4 = self.processor._parse_yaml_with_recovery(yaml_text4)
+        self.assertEqual(result4["title"], "Meeting Notes")
+        # Tabs should be converted to spaces
+
+        # Test case 5: Multiple template placeholders
+        yaml_text5 = (
+            "blog_network_publisher: {{blog_network_publisher}}\n"
+            "date_of_post: {{date_of_post}}\n"
+            "title: Article Title"
+        )
+        result5 = self.processor._parse_yaml_with_recovery(yaml_text5)
+        self.assertEqual(result5["title"], "Article Title")
+        self.assertEqual(result5["blog_network_publisher"], "")
+        self.assertEqual(result5["date_of_post"], "")
+
+    def test_fix_yaml_common_errors_edge_cases(self):
+        """Test edge cases in YAML fixing functions."""
+        # Test missing space after colon with URL preservation
+        yaml_with_url = "url:https://docs.example.org/en/use/content\ntitle:Document"
+        fixed = self.processor._fix_yaml_common_errors(yaml_with_url)
+        self.assertIn("url: https://docs.example.org/en/use/content", fixed)
+        self.assertIn("title: Document", fixed)
+
+        # Test tab replacement
+        yaml_with_tabs = "attendees:\n\t- Name1\n\t- Name2"
+        fixed = self.processor._fix_yaml_common_errors(yaml_with_tabs)
+        self.assertNotIn("\t", fixed)
+        self.assertIn("  - Name1", fixed)
+        self.assertIn("  - Name2", fixed)
+
+    def test_quote_problematic_yaml_values_edge_cases(self):
+        """Test YAML value quoting for problematic characters."""
+        # Test unquoted colon in value
+        yaml_text = "title: Book: The Complete Guide\nsubtitle: Everything: You Need"
+        fixed = self.processor._quote_problematic_yaml_values(yaml_text)
+        self.assertIn("title: 'Book: The Complete Guide'", fixed)
+        self.assertIn("subtitle: 'Everything: You Need'", fixed)
+
+        # Test URL quoting
+        yaml_text = "url: https://example.com/path\nauthor: John Doe"
+        fixed = self.processor._quote_problematic_yaml_values(yaml_text)
+        self.assertIn("url: 'https://example.com/path'", fixed)
+        self.assertIn("author: John Doe", fixed)  # No colon, no quote needed
 
 
 if __name__ == "__main__":
