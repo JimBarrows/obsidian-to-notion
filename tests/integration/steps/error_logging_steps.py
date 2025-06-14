@@ -12,11 +12,9 @@ from behave import given, then, when
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.obsidian_to_notion.parsers.obsidian_parser import (
+from src.obsidian_to_notion.parsers.obsidian_parser import (  # noqa: E402
     ObsidianVaultProcessor,
 )
-
-# noqa: E402
 from src.obsidian_to_notion.utils.error_handling import (  # noqa: E402
     MigrationError,
     NotionAPIError,
