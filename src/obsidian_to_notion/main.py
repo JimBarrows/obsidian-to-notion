@@ -1,12 +1,306 @@
-"""Main entry point for the Obsidian to Notion migration tool."""
+#!/usr/bin/env python3
+"""Obsidian to Notion Migration Tool."""
 
 import argparse
 import logging
 import sys
-from pathlib import Path
+from typing import Dict, List
 
 from .config import AppConfig
-from .utils.error_handling import setup_error_handling
+from .notion import DeduplicationManager, NotionMigrationClient
+from .parsers import ObsidianVaultProcessor
+from .utils import MigrationError, ProgressTracker
+
+
+class WikilinkConverter:
+    """Wrapper for WikilinkConverter with additional functionality."""
+
+    def __init__(self, page_mapping=None):
+        self.page_mapping = page_mapping or {}
+        self.page_cache = {}
+        self.broken_links = []
+
+    def add_page_to_cache(self, title: str, page_id: str):
+        """Add a page to the cache for link resolution."""
+        self.page_cache[title.lower()] = page_id
+        self.page_mapping[title] = page_id
+
+    def convert_content(self, content: str, wikilinks: List[Dict]) -> str:
+        """Convert wikilinks in content."""
+        # For simple implementation, just return content as-is
+        # In a full implementation, this would parse and convert wikilinks
+        result = content
+        for link in wikilinks:
+            if link.get("note_name"):
+                note_name = link["note_name"]
+                if note_name.lower() in self.page_cache:
+                    # Replace with Notion link (simplified)
+                    pass
+                else:
+                    self.broken_links.append(note_name)
+        return result
+
+    def get_broken_links_report(self) -> str:
+        """Get report of broken links."""
+        if not self.broken_links:
+            return "No broken links found"
+        return f"Found {len(self.broken_links)} broken links: " + ", ".join(
+            self.broken_links
+        )
+
+
+class ObsidianToNotionMigrator:
+    """Main orchestrator for Obsidian to Notion migration."""
+
+    def __init__(self, config: AppConfig):
+        self.config = config
+        self.vault_processor = ObsidianVaultProcessor(config.vault.path)
+        self.notion_client = NotionMigrationClient(
+            config.notion.token, config.notion.rate_limit_requests_per_second
+        )
+        self.wikilink_converter = WikilinkConverter({})
+        self.dedup_manager = DeduplicationManager(
+            self.notion_client, config.notion.database_id
+        )
+
+        # Setup logging
+        logging.basicConfig(
+            level=getattr(logging, config.logging.level),
+            format="%(asctime)s - %(levelname)s - %(message)s",
+            handlers=[
+                logging.FileHandler(config.logging.log_file),
+                logging.StreamHandler(sys.stdout),
+            ],
+        )
+        self.logger = logging.getLogger(__name__)
+
+    def migrate(self, dry_run: bool = False) -> Dict:
+        """Execute complete migration process"""
+        self.logger.info("Starting Obsidian to Notion migration")
+
+        try:
+            # Phase 1: Process vault
+            self.logger.info("Phase 1: Processing Obsidian vault...")
+            vault_data = self.vault_processor.process_vault()
+
+            if not vault_data["markdown_files"]:
+                self.logger.warning("No markdown files found in vault")
+                return {"status": "no_files", "stats": {}}
+
+            # Phase 2: Load existing pages for deduplication
+            if self.config.migration.skip_duplicates:
+                self.logger.info("Phase 2: Loading existing Notion pages...")
+                self.dedup_manager.load_existing_pages()
+
+            # Phase 3: Create/update pages
+            self.logger.info("Phase 3: Migrating pages to Notion...")
+            if dry_run:
+                self.logger.info("DRY RUN MODE - No actual changes will be made")
+                migration_stats = self._dry_run_migration(vault_data["markdown_files"])
+            else:
+                migration_stats = self._execute_migration(vault_data["markdown_files"])
+
+            # Phase 4: Generate report
+            self.logger.info("Phase 4: Generating migration report...")
+            report = self._generate_report(migration_stats, vault_data)
+
+            self.logger.info("Migration completed successfully")
+            return {"status": "completed", "stats": migration_stats, "report": report}
+
+        except Exception as e:
+            self.logger.error(f"Migration failed: {e}")
+            raise MigrationError(f"Migration failed: {e}") from e
+
+    def _execute_migration(self, markdown_files: List[Dict]) -> Dict:
+        """Execute the actual migration"""
+        stats = {"successful": 0, "failed": 0, "skipped": 0, "errors": []}
+
+        with ProgressTracker(len(markdown_files), "Migrating files") as progress:
+            for file_info in markdown_files:
+                try:
+                    result = self._migrate_single_file(file_info)
+
+                    if result["status"] == "skipped":
+                        progress.update(1, "skipped")
+                        stats["skipped"] += 1
+                    elif result["status"] == "success":
+                        progress.update(1, "successful")
+                        stats["successful"] += 1
+                        # Add to wikilink cache for link resolution
+                        self.wikilink_converter.add_page_to_cache(
+                            file_info["title"], result["page_id"]
+                        )
+                    else:
+                        progress.update(1, "failed", result.get("error"))
+                        stats["failed"] += 1
+                        stats["errors"].append(
+                            {"file": file_info["title"], "error": result.get("error")}
+                        )
+
+                    progress.set_postfix(
+                        success=stats["successful"],
+                        failed=stats["failed"],
+                        skipped=stats["skipped"],
+                    )
+
+                except Exception as e:
+                    error_msg = f"Error migrating {file_info['title']}: {e}"
+                    progress.update(1, "failed", error_msg)
+                    progress.write(error_msg)
+                    stats["failed"] += 1
+                    stats["errors"].append(
+                        {"file": file_info["title"], "error": str(e)}
+                    )
+
+        return stats
+
+    def _dry_run_migration(self, markdown_files: List[Dict]) -> Dict:
+        """Simulate migration without making changes"""
+        stats = {"successful": 0, "failed": 0, "skipped": 0, "errors": []}
+
+        for file_info in markdown_files:
+            title = file_info["title"]
+
+            if (
+                self.config.migration.skip_duplicates
+                and self.dedup_manager.should_skip_page(title)
+            ):
+                print(f"WOULD SKIP: {title} (already exists)")
+                stats["skipped"] += 1
+            else:
+                print(f"WOULD CREATE: {title}")
+                stats["successful"] += 1
+
+        return stats
+
+    def _migrate_single_file(self, file_info: Dict) -> Dict:
+        """Migrate a single file to Notion"""
+        title = file_info["title"]
+
+        # Check for duplicates
+        if (
+            self.config.migration.skip_duplicates
+            and self.dedup_manager.should_skip_page(title)
+        ):
+            return {"status": "skipped", "reason": "duplicate"}
+
+        try:
+            # Convert content
+            converted_content = self.wikilink_converter.convert_content(
+                file_info["content"], file_info["wikilinks"]
+            )
+
+            # Prepare Notion page properties
+            properties = {
+                "Name": {
+                    "title": [
+                        {
+                            "text": {
+                                "content": self.vault_processor.sanitize_for_notion(
+                                    title
+                                )
+                            }
+                        }
+                    ]
+                }
+            }
+
+            # Add metadata as properties if present
+            for key, value in file_info["metadata"].items():
+                if key != "title" and isinstance(value, (str, int, float, bool)):
+                    properties[key] = {"rich_text": [{"text": {"content": str(value)}}]}
+
+            # Create page content blocks
+            children = self._content_to_notion_blocks(converted_content)
+
+            # Create page in Notion
+            page = self.notion_client.create_page(
+                database_id=self.config.notion.database_id,
+                properties=properties,
+                children=children,
+            )
+
+            if page:
+                return {"status": "success", "page_id": page["id"]}
+            else:
+                return {"status": "failed", "error": "Failed to create page"}
+
+        except Exception as e:
+            return {"status": "failed", "error": str(e)}
+
+    def _content_to_notion_blocks(self, content: str) -> List[Dict]:
+        """Convert markdown content to Notion blocks"""
+        if not content.strip():
+            return []
+
+        # Simple implementation - convert to paragraph blocks
+        # In a full implementation, you'd parse markdown properly
+        lines = content.split("\n")
+        blocks = []
+
+        current_paragraph = []
+
+        for line in lines:
+            line = line.strip()
+            if not line:
+                if current_paragraph:
+                    blocks.append(
+                        {
+                            "type": "paragraph",
+                            "paragraph": {
+                                "rich_text": [
+                                    {"text": {"content": "\n".join(current_paragraph)}}
+                                ]
+                            },
+                        }
+                    )
+                    current_paragraph = []
+            else:
+                current_paragraph.append(line)
+
+        # Add final paragraph if exists
+        if current_paragraph:
+            blocks.append(
+                {
+                    "type": "paragraph",
+                    "paragraph": {
+                        "rich_text": [
+                            {"text": {"content": "\n".join(current_paragraph)}}
+                        ]
+                    },
+                }
+            )
+
+        return blocks
+
+    def _generate_report(self, stats: Dict, vault_data: Dict) -> str:
+        """Generate migration summary report"""
+        total_files = len(vault_data["markdown_files"])
+        total_attachments = len(vault_data["attachments"])
+
+        report = [
+            "# Migration Report",
+            "## Summary",
+            f"- Total files processed: {total_files}",
+            f"- Successfully migrated: {stats['successful']}",
+            f"- Skipped (duplicates): {stats['skipped']}",
+            f"- Failed: {stats['failed']}",
+            f"- Total attachments found: {total_attachments}",
+            "",
+        ]
+
+        if stats["errors"]:
+            report.extend(["## Errors", ""])
+            for error in stats["errors"]:
+                report.append(f"- **{error['file']}**: {error['error']}")
+            report.append("")
+
+        # Add broken links report
+        broken_links_report = self.wikilink_converter.get_broken_links_report()
+        if "No broken links" not in broken_links_report:
+            report.extend(["## Broken Links", broken_links_report])
+
+        return "\n".join(report)
 
 
 def setup_logging(config: AppConfig, verbose: bool = False) -> None:
@@ -38,69 +332,46 @@ def setup_logging(config: AppConfig, verbose: bool = False) -> None:
 
 
 def main() -> None:
-    """Main function for the Obsidian to Notion migration tool."""
-    parser = argparse.ArgumentParser(
-        description="Migrate Obsidian markdown files to Notion"
-    )
+    """CLI entry point."""
+    parser = argparse.ArgumentParser(description="Migrate Obsidian vault to Notion")
     parser.add_argument(
-        "--config",
-        type=str,
-        default="config.yaml",
-        help="Path to configuration file (default: config.yaml)",
-    )
-    parser.add_argument(
-        "--vault", type=Path, help="Override vault path from configuration"
+        "--config", default="config.yaml", help="Configuration file path"
     )
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Run without actually uploading to Notion",
-    )
-    parser.add_argument(
-        "--verbose", "-v", action="store_true", help="Enable verbose logging"
+        help="Show what would be migrated without making changes",
     )
 
     args = parser.parse_args()
-
-    # Setup error handling
-    setup_error_handling()
 
     try:
         # Load configuration
         config = AppConfig.load_from_file(args.config)
 
-        # Override vault path if provided
-        if args.vault:
-            config.vault.path = str(args.vault)
-
-        # Set up logging
-        setup_logging(config, args.verbose)
-        logger = logging.getLogger(__name__)
-
-        # Validate configuration
-        try:
-            config.validate()
-        except ValueError as e:
-            logger.error(f"Invalid configuration: {e}")
+        # Validate required environment variables
+        if not config.notion.token:
+            print("Error: NOTION_TOKEN environment variable is required")
             sys.exit(1)
 
-        # Log startup information
-        logger.info("Starting Obsidian to Notion migration")
-        logger.info(f"Vault path: {config.vault.path}")
-        logger.info(f"Batch size: {config.migration.batch_size}")
-        logger.info(f"Parallel workers: {config.migration.parallel_workers}")
+        if not config.notion.database_id:
+            print("Error: NOTION_DATABASE_ID environment variable is required")
+            sys.exit(1)
 
-        if args.dry_run:
-            logger.info("Running in dry-run mode - no changes will be made to Notion")
+        # Create migrator and run
+        migrator = ObsidianToNotionMigrator(config)
+        result = migrator.migrate(dry_run=args.dry_run)
 
-        # TODO: Implement migration logic
-        logger.info("Migration logic not yet implemented")
+        if result["status"] == "completed":
+            print("\n" + "=" * 50)
+            print("MIGRATION COMPLETED SUCCESSFULLY")
+            print("=" * 50)
+            print(result["report"])
+        else:
+            print(f"Migration status: {result['status']}")
 
-    except FileNotFoundError as e:
-        logging.error(f"Configuration file not found: {e}")
-        sys.exit(1)
     except Exception as e:
-        logging.error(f"Migration failed: {e}", exc_info=True)
+        print(f"Migration failed: {e}")
         sys.exit(1)
 
 
