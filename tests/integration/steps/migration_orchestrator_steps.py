@@ -154,7 +154,7 @@ def step_run_migration(context):
                     "id": page_id,
                     "title": title,
                     "properties": properties,
-                    "children": children,
+                    "children": children or [],
                 }
             )
             return {"id": page_id}

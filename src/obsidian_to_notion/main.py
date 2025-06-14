@@ -4,6 +4,7 @@
 import argparse
 import logging
 import sys
+from pathlib import Path
 from typing import Any, Dict, List
 
 from .config import AppConfig
@@ -191,6 +192,70 @@ class ObsidianToNotionMigrator:
 
         return stats
 
+    def _prepare_notion_properties(self, file_info: Dict[str, Any]) -> Dict[str, Any]:
+        """Prepare Notion page properties from file metadata."""
+        title = file_info["title"]
+
+        # Start with title property
+        properties = {
+            "Name": {
+                "title": [
+                    {
+                        "text": {
+                            "content": self.vault_processor.sanitize_for_notion(title)
+                        }
+                    }
+                ]
+            }
+        }
+
+        # Map Obsidian metadata to Notion properties
+        metadata = file_info.get("metadata", {})
+
+        # Handle Tags (multi_select)
+        if "tags" in metadata:
+            tags = metadata["tags"]
+            if isinstance(tags, list):
+                # type: ignore[dict-item]
+                properties["Tags"] = {"multi_select": [{"name": tag} for tag in tags]}
+            elif isinstance(tags, str):
+                # Handle comma-separated or single tag
+                tag_list = [t.strip() for t in tags.split(",") if t.strip()]
+                # type: ignore[dict-item]
+                properties["Tags"] = {
+                    "multi_select": [{"name": tag} for tag in tag_list]
+                }
+
+        # Handle Directory (rich_text) - use the file path
+        file_path = file_info.get("path")
+        if file_path:
+            directory = str(Path(file_path).parent)
+            # type: ignore[dict-item]
+            properties["Directory"] = {"rich_text": [{"text": {"content": directory}}]}
+
+        # Handle URL (url)
+        if "url" in metadata and metadata["url"]:
+            properties["URL"] = {"url": str(metadata["url"])}  # type: ignore[dict-item]
+
+        # Handle Type (rich_text for now, but suggest using select)
+        if "type" in metadata and metadata["type"]:
+            # type: ignore[dict-item]
+            properties["Type"] = {
+                "rich_text": [{"text": {"content": str(metadata["type"])}}]
+            }
+
+        # Handle Modified (date)
+        if "modified" in metadata and metadata["modified"]:
+            # Try to ensure it's in ISO format
+            # type: ignore[dict-item]
+            properties["Modified"] = {"date": {"start": str(metadata["modified"])}}
+        elif "date" in metadata and metadata["date"]:
+            # Fall back to date field
+            # type: ignore[dict-item]
+            properties["Modified"] = {"date": {"start": str(metadata["date"])}}
+
+        return properties
+
     def _migrate_single_file(self, file_info: Dict[str, Any]) -> Dict[str, Any]:
         """Migrate a single file to Notion."""
         title = file_info["title"]
@@ -208,25 +273,8 @@ class ObsidianToNotionMigrator:
                 file_info["content"], file_info["wikilinks"]
             )
 
-            # Prepare Notion page properties
-            properties = {
-                "Name": {
-                    "title": [
-                        {
-                            "text": {
-                                "content": self.vault_processor.sanitize_for_notion(
-                                    title
-                                )
-                            }
-                        }
-                    ]
-                }
-            }
-
-            # Add metadata as properties if present
-            for key, value in file_info["metadata"].items():
-                if key != "title" and isinstance(value, (str, int, float, bool)):
-                    properties[key] = {"rich_text": [{"text": {"content": str(value)}}]}
+            # Prepare page properties
+            properties = self._prepare_notion_properties(file_info)
 
             # Create page content blocks
             children = self._content_to_notion_blocks(converted_content)
@@ -271,36 +319,72 @@ class ObsidianToNotionMigrator:
 
         current_paragraph: List[str] = []
 
+        def add_paragraph_block(text_lines: List[str]) -> None:
+            """Add paragraph block, splitting if text exceeds Notion's char limit."""
+            if not text_lines:
+                return
+
+            full_text = "\n".join(text_lines)
+
+            # Split text if it exceeds 2000 characters
+            if len(full_text) <= 2000:
+                blocks.append(
+                    {
+                        "type": "paragraph",
+                        "paragraph": {"rich_text": [{"text": {"content": full_text}}]},
+                    }
+                )
+            else:
+                # For very long single lines, we need to split by character count
+                if len(text_lines) == 1 and "\n" not in text_lines[0]:
+                    # Single long line - split by characters
+                    line = text_lines[0]
+                    chunks = []
+                    while len(line) > 1900:
+                        chunks.append(line[:1900])
+                        line = line[1900:]
+                    if line:
+                        chunks.append(line)
+                else:
+                    # Multiple lines - split by lines trying to keep under limit
+                    chunks = []
+                    current_chunk = ""
+
+                    for line in text_lines:
+                        if len(current_chunk) + len(line) + 1 > 1900:  # +1 for newline
+                            if current_chunk:
+                                chunks.append(current_chunk)
+                            current_chunk = line
+                        else:
+                            if current_chunk:
+                                current_chunk += "\n" + line
+                            else:
+                                current_chunk = line
+
+                    if current_chunk:
+                        chunks.append(current_chunk)
+
+                # Add each chunk as a separate paragraph
+                for chunk in chunks:
+                    blocks.append(
+                        {
+                            "type": "paragraph",
+                            "paragraph": {"rich_text": [{"text": {"content": chunk}}]},
+                        }
+                    )
+
         for line in lines:
             line = line.strip()
             if not line:
                 if current_paragraph:
-                    blocks.append(
-                        {
-                            "type": "paragraph",
-                            "paragraph": {
-                                "rich_text": [
-                                    {"text": {"content": "\n".join(current_paragraph)}}
-                                ]
-                            },
-                        }
-                    )
+                    add_paragraph_block(current_paragraph)
                     current_paragraph = []
             else:
                 current_paragraph.append(line)
 
         # Add final paragraph if exists
         if current_paragraph:
-            blocks.append(
-                {
-                    "type": "paragraph",
-                    "paragraph": {
-                        "rich_text": [
-                            {"text": {"content": "\n".join(current_paragraph)}}
-                        ]
-                    },
-                }
-            )
+            add_paragraph_block(current_paragraph)
 
         return blocks
 
@@ -362,6 +446,12 @@ def setup_logging(config: AppConfig, verbose: bool = False) -> None:
     logging.root.setLevel(log_level)
     logging.root.addHandler(console_handler)
     logging.root.addHandler(file_handler)
+
+    # Suppress HTTP request logs from httpx/httpcore (used by notion-client)
+    # unless in debug mode
+    if not verbose:
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+        logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
 def main() -> None:
