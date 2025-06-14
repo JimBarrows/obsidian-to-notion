@@ -108,9 +108,9 @@ class NotionMigrationClient:
                     logger.error(
                         f"Failed after {max_retries} attempts: {enhanced_message}"
                     )
-                    # Create a new error with enhanced message
-                    e.message = enhanced_message
-                    raise e
+                    # Just re-raise the original exception - the enhanced message
+                    # is already logged above
+                    raise
                 else:
                     wait_time = 2**attempt
                     logger.warning(
