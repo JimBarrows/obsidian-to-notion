@@ -379,3 +379,73 @@ class TestDeduplicationManager:
         # Test with empty title
         page5 = {"properties": {"Name": {"type": "title", "title": []}}}
         assert dedup.extract_title(page5) is None
+
+    @patch("obsidian_to_notion.notion.client.Client")
+    def test_database_not_found_error(self, mock_client_class):
+        """Test handling of database not found error."""
+        client = NotionMigrationClient("test-token")
+
+        # Mock database not found error
+        response_mock = Mock()
+        response_mock.status_code = 404
+        error = APIResponseError(
+            response_mock,
+            "Could not find database with ID: f5d6edd0-da90-4e24-9f2f-fdddee9866d8",
+            "object_not_found",
+        )
+        client.client.pages.create = Mock(side_effect=error)
+
+        # Attempt to create a page should raise the error
+        with pytest.raises(APIResponseError) as exc_info:
+            client.create_page("f5d6edd0-da90-4e24-9f2f-fdddee9866d8", {}, [])
+
+        # Verify error details
+        assert exc_info.value.code == "object_not_found"
+        assert "database" in str(exc_info.value).lower()
+
+    @patch("obsidian_to_notion.notion.client.Client")
+    def test_database_permission_error(self, mock_client_class):
+        """Test handling of database permission error."""
+        client = NotionMigrationClient("test-token")
+
+        # Mock permission error
+        response_mock = Mock()
+        response_mock.status_code = 403
+        error = APIResponseError(
+            response_mock,
+            "Insufficient permissions for this database",
+            "restricted_resource",
+        )
+        client.client.pages.create = Mock(side_effect=error)
+
+        # Attempt to create a page should raise the error
+        with pytest.raises(APIResponseError) as exc_info:
+            client.create_page("db-id", {}, [])
+
+        # Verify error details
+        assert exc_info.value.code == "restricted_resource"
+        assert response_mock.status_code == 403
+
+    @patch("obsidian_to_notion.notion.client.Client")
+    def test_create_page_with_database_error_message(self, mock_client_class):
+        """Test that database errors provide helpful context."""
+        client = NotionMigrationClient("test-token")
+
+        # Mock the specific error from the issue
+        response_mock = Mock()
+        response_mock.status_code = 400
+        error_msg = (
+            "Could not find database with ID: f5d6edd0-da90-4e24-9f2f-fdddee9866d8. "
+            "Make sure the relevant pages and databases are shared with "
+            "the integration."
+        )
+        error = APIResponseError(response_mock, error_msg, "validation_error")
+        client.client.pages.create = Mock(side_effect=error)
+
+        with pytest.raises(APIResponseError) as exc_info:
+            client.create_page("f5d6edd0-da90-4e24-9f2f-fdddee9866d8", {}, [])
+
+        # The error message should contain helpful information
+        error_str = str(exc_info.value)
+        assert "database" in error_str.lower()
+        assert "shared with the integration" in error_str

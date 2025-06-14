@@ -310,6 +310,195 @@ Content here."""
         assert "\\" not in clean_text
         assert "*" not in clean_text
 
+    def test_process_file_with_template_placeholders(self):
+        """Test processing file with template placeholders in YAML."""
+        test_file = self.vault_path / "template.md"
+        test_file.write_text(
+            """---
+author: {{author}}
+title: {{title}}
+date: {{date}}
+tags: [{{tag1}}, {{tag2}}]
+---
+
+# Template Document
+
+This document has template placeholders."""
+        )
+
+        file_info = self.processor.process_markdown_file(test_file)
+
+        # File should be processed despite template placeholders
+        self.assertIsNotNone(file_info)
+        self.assertEqual(file_info["title"], "template")  # From filename
+        self.assertIn("Template Document", file_info["content"])
+        # Metadata might be empty or contain placeholders as strings
+        self.assertIsInstance(file_info["metadata"], dict)
+
+    def test_process_file_with_yaml_tabs(self):
+        """Test processing file with tabs in YAML frontmatter."""
+        test_file = self.vault_path / "tabs.md"
+        test_file.write_text(
+            """---
+author:
+\t- [[Robert Turnbull]]
+\t- [[John Doe]]
+title: Document with Tabs
+---
+
+# Content
+The YAML has tab characters."""
+        )
+
+        file_info = self.processor.process_markdown_file(test_file)
+
+        # File should be processed despite tabs in YAML
+        self.assertIsNotNone(file_info)
+        self.assertIn("Content", file_info["content"])
+
+    def test_process_file_with_missing_colon_space(self):
+        """Test processing file with missing space after colon in YAML."""
+        test_file = self.vault_path / "missing_space.md"
+        test_file.write_text(
+            """---
+business name:Copart
+location:USA
+employees:7000
+---
+
+# Business Info
+Missing spaces after colons."""
+        )
+
+        file_info = self.processor.process_markdown_file(test_file)
+
+        # File should be processed despite YAML syntax errors
+        self.assertIsNotNone(file_info)
+        self.assertIn("Business Info", file_info["content"])
+
+    def test_process_file_with_markdown_in_yaml(self):
+        """Test processing file with markdown links in YAML values."""
+        test_file = self.vault_path / "markdown_yaml.md"
+        test_file.write_text(
+            """---
+author: [Kendra Cherry](https://www.verywellmind.com)
+source: [Article Link](https://example.com/article)
+related: [[Other Note]]
+---
+
+# Psychology Article
+YAML contains markdown links."""
+        )
+
+        file_info = self.processor.process_markdown_file(test_file)
+
+        # File should be processed despite markdown in YAML
+        self.assertIsNotNone(file_info)
+        self.assertIn("Psychology Article", file_info["content"])
+
+    def test_process_file_with_invalid_yaml_continues(self):
+        """Test that invalid YAML doesn't prevent content extraction."""
+        test_file = self.vault_path / "invalid.md"
+        test_file.write_text(
+            """---
+this is not valid yaml at all: {{{
+another line: [[[
+---
+
+# Important Content
+
+This content should still be extracted even if YAML is invalid."""
+        )
+
+        file_info = self.processor.process_markdown_file(test_file)
+
+        # Content should still be extracted
+        self.assertIsNotNone(file_info)
+        self.assertIn("Important Content", file_info["content"])
+        self.assertIn("This content should still be extracted", file_info["content"])
+
+    def test_process_vault_with_mixed_valid_invalid_files(self):
+        """Test vault processing continues with invalid YAML files."""
+        # Create valid file
+        valid_file = self.vault_path / "valid.md"
+        valid_file.write_text(
+            """---
+title: Valid Document
+author: John Doe
+---
+
+# Valid Content
+This file has valid YAML."""
+        )
+
+        # Create invalid file
+        invalid_file = self.vault_path / "invalid.md"
+        invalid_file.write_text(
+            """---
+author: {{author}}
+broken: [[[
+---
+
+# Invalid YAML File
+But content is still good."""
+        )
+
+        # Process vault
+        result = self.processor.process_vault()
+
+        # Both files should be processed
+        self.assertEqual(len(result["markdown_files"]), 2)
+
+        # Verify content was extracted from both
+        titles = [f["title"] for f in result["markdown_files"]]
+        self.assertIn("Valid Document", titles)
+        self.assertIn("invalid", titles)  # Filename used as fallback
+
+    def test_yaml_error_recovery_with_frontmatter_delimiters(self):
+        """Test handling of various YAML delimiter issues."""
+        test_cases = [
+            # Missing closing delimiter
+            ("---\ntitle: Test\n\n# Content", True),
+            # Extra delimiters
+            ("---\ntitle: Test\n---\n---\n# Content", True),
+            # No opening delimiter
+            ("title: Test\n---\n# Content", True),
+        ]
+
+        for idx, (content, should_extract_content) in enumerate(test_cases):
+            test_file = self.vault_path / f"delimiter_test_{idx}.md"
+            test_file.write_text(content)
+
+            file_info = self.processor.process_markdown_file(test_file)
+
+            if should_extract_content:
+                self.assertIsNotNone(file_info)
+                self.assertIn("Content", file_info.get("content", ""))
+
+    def test_extract_wikilinks_from_yaml_corrupted_file(self):
+        """Test wikilink extraction continues despite YAML errors."""
+        test_file = self.vault_path / "yaml_with_links.md"
+        test_file.write_text(
+            """---
+related: [[Note 1]] [[Note 2]]
+author: {{author}}
+---
+
+# Document
+
+Contains [[Note 3]] and [[Note 4]] in content."""
+        )
+
+        file_info = self.processor.process_markdown_file(test_file)
+
+        # Should still extract wikilinks from content
+        self.assertIsNotNone(file_info)
+        wikilinks = file_info.get("wikilinks", [])
+        # Should find at least the content wikilinks
+        note_names = [link["note_name"] for link in wikilinks]
+        self.assertIn("Note 3", note_names)
+        self.assertIn("Note 4", note_names)
+
 
 if __name__ == "__main__":
     unittest.main()

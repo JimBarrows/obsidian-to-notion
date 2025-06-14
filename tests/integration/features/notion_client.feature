@@ -66,3 +66,17 @@ Feature: Notion API Client
     When I upload the file
     Then the file upload should return None
     And a warning should be logged about external storage
+
+  Scenario: Handle database not found error
+    Given I have a NotionMigrationClient instance
+    And the database ID "invalid-database-id" does not exist
+    When I try to create a page
+    Then I should receive a clear error message about the database not being found
+    And the error should mention checking database permissions
+
+  Scenario: Handle database not shared with integration
+    Given I have a NotionMigrationClient instance
+    And the database exists but is not shared with the integration
+    When I try to create a page
+    Then I should receive a clear error message about missing permissions
+    And the error should suggest sharing the database with the integration

@@ -23,6 +23,52 @@ class NotionMigrationClient:
         self.request_timestamps: List[float] = []
         self.rate_limit_rps = rate_limit_rps
 
+    def _enhance_error_message(self, error: APIResponseError) -> str:
+        """Enhance API error messages with helpful context.
+
+        Args:
+            error: The API error
+
+        Returns:
+            Enhanced error message
+        """
+        base_message = str(error)
+
+        # Database not found errors
+        if error.code == "object_not_found" and "database" in base_message.lower():
+            return (
+                f"{base_message}\n\n"
+                "To fix this error:\n"
+                "1. Verify the database ID is correct\n"
+                "2. Ensure the database is shared with your integration:\n"
+                "   - Open the database in Notion\n"
+                "   - Click 'Share' in the top right\n"
+                "   - Invite your integration by name\n"
+                "3. Check that your integration has the correct permissions"
+            )
+
+        # Permission errors
+        elif error.code in ["restricted_resource", "unauthorized"]:
+            return (
+                f"{base_message}\n\n"
+                "To fix this permission error:\n"
+                "1. Ensure the database/page is shared with your integration\n"
+                "2. Check that your integration token is valid\n"
+                "3. Verify the integration has the necessary capabilities"
+            )
+
+        # Validation errors mentioning database
+        elif error.code == "validation_error" and "database" in base_message.lower():
+            return (
+                f"{base_message}\n\n"
+                "This typically means:\n"
+                "1. The database ID may be incorrect\n"
+                "2. The database needs to be shared with your integration\n"
+                "3. The database may have been deleted or archived"
+            )
+
+        return base_message
+
     def rate_limited_request(
         self, method: Callable[..., Any], **kwargs: Any
     ) -> Optional[Dict[str, Any]]:
@@ -58,8 +104,13 @@ class NotionMigrationClient:
                     logger.warning(f"Rate limited, waiting {retry_after} seconds...")
                     time.sleep(retry_after)
                 elif attempt == max_retries - 1:
-                    logger.error(f"Failed after {max_retries} attempts: {e}")
-                    raise
+                    enhanced_message = self._enhance_error_message(e)
+                    logger.error(
+                        f"Failed after {max_retries} attempts: {enhanced_message}"
+                    )
+                    # Create a new error with enhanced message
+                    e.message = enhanced_message
+                    raise e
                 else:
                     wait_time = 2**attempt
                     logger.warning(

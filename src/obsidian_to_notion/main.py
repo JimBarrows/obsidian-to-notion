@@ -364,7 +364,30 @@ def main() -> None:
             print(f"Migration status: {result['status']}")
 
     except Exception as e:
-        print(f"Migration failed: {e}")
+        # Check if it's a Notion API error and provide more helpful context
+        error_message = str(e)
+
+        if "database" in error_message.lower() and (
+            "not found" in error_message.lower() or "Could not find" in error_message
+        ):
+            print("\n" + "=" * 70)
+            print("DATABASE CONNECTION ERROR")
+            print("=" * 70)
+            print(f"\n{error_message}\n")
+            print("To resolve this issue:")
+            print("1. Verify your NOTION_DATABASE_ID is correct")
+            print("2. Ensure the database is shared with your integration:")
+            print("   - Open the database in Notion")
+            print("   - Click 'Share' in the top right")
+            print("   - Invite your integration by name")
+            print("3. Check that your integration has the necessary permissions\n")
+            print(
+                "For more information, see: "
+                "https://developers.notion.com/docs/authorization"
+            )
+            print("=" * 70)
+        else:
+            print(f"Migration failed: {e}")
         sys.exit(1)
 
 

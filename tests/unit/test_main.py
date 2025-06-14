@@ -338,6 +338,11 @@ class TestObsidianToNotionMigrator:
         mock_dedup.should_skip_page.return_value = False
         mock_dedup_class.return_value = mock_dedup
 
+        # Mock wikilink converter
+        mock_converter = Mock()
+        mock_converter.get_broken_links_report.return_value = "No broken links found"
+        mock_converter_class.return_value = mock_converter
+
         # Create and run migrator in dry-run mode
         migrator = ObsidianToNotionMigrator(config)
 
