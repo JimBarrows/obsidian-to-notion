@@ -32,7 +32,7 @@ Feature: Obsidian Vault Processing
       date: 2024-01-15
       custom_field: value
       ---
-      
+
       # Content
       This is the content.
       """
@@ -81,12 +81,12 @@ Feature: Obsidian Vault Processing
     Given a markdown file with content:
       """
       # Document with attachments
-      
+
       ![[presentation.pdf]]
       ![[diagram.png]]
       ![[spreadsheet.xlsx]]
       ![[photo.jpg]]
-      
+
       Regular link: [[Not an attachment]]
       """
     When I process the vault
@@ -113,3 +113,50 @@ Feature: Obsidian Vault Processing
     Then the file should be skipped
     And an error should be logged
     And processing should continue with other files
+
+  Scenario: Process files with invalid YAML frontmatter
+    Given the vault contains files with invalid YAML:
+      | filename | content |
+      | template.md | ---\nauthor: {{author}}\ndate: {{date}}\n---\n# Template |
+      | tabs.md | ---\nauthor:\n\t- [[Robert Turnbull]]\n---\n# Tab Issue |
+      | missing_colon.md | ---\nbusiness name:Copart\n---\n# Missing Space |
+      | markdown_in_yaml.md | ---\nauthor: [Kendra Cherry](https://example.com)\n---\n# Link Issue |
+    When I process the vault
+    Then I should find 4 markdown files
+    And each file should be processed despite YAML errors
+    And invalid frontmatter should be skipped or corrected
+
+  Scenario: Handle template placeholders in frontmatter
+    Given a markdown file with template placeholders:
+      """
+      ---
+      author: {{author}}
+      title: {{title}}
+      date: {{date}}
+      tags: [{{tag1}}, {{tag2}}]
+      ---
+
+      # Document with Templates
+      This document contains template placeholders.
+      """
+    When I process the vault
+    Then the file should be processed successfully
+    And template placeholders should be handled gracefully
+    And the content should be preserved
+
+  Scenario: Fix common YAML syntax errors
+    Given the vault contains files with fixable YAML errors:
+      | filename | original_yaml | expected_fix |
+      | tabs_to_spaces.md | "author:\n\t- Name" | "author:\n  - Name" |
+      | missing_space.md | "key:value" | "key: value" |
+      | quotes_needed.md | "title: Book: Subtitle" | "title: 'Book: Subtitle'" |
+    When I process the vault with error recovery
+    Then each file should have corrected YAML frontmatter
+    And the files should be processed successfully
+
+  Scenario: Continue processing when YAML parsing fails
+    Given a vault with multiple files including invalid YAML
+    When I process the vault
+    Then all valid files should be processed
+    And files with invalid YAML should not stop the migration
+    And appropriate warnings should be logged for invalid files
