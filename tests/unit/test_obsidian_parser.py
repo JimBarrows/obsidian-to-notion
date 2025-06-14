@@ -285,6 +285,31 @@ Content here."""
         self.assertIn("mixed case title", self.processor.wikilink_map)
         self.assertNotIn("Mixed Case Title", self.processor.wikilink_map)
 
+    def test_extract_wikilinks(self):
+        """Test extraction of various wikilink formats as specified in issue #6."""
+        processor = ObsidianVaultProcessor("/tmp")
+
+        content = (
+            "This is a [[basic link]] and [[link with|display text]] and ![[embedded]]"
+        )
+        wikilinks = processor.extract_wikilinks(content)
+
+        assert len(wikilinks) == 3
+        assert wikilinks[0]["note_name"] == "basic link"
+        assert wikilinks[1]["display_text"] == "display text"
+        assert wikilinks[2]["is_embed"] is True
+
+    def test_sanitize_for_notion(self):
+        """Test text sanitization for Notion compatibility as specified in issue #6."""
+        processor = ObsidianVaultProcessor("/tmp")
+
+        dirty_text = "File/with\\bad:chars|and*stuff"
+        clean_text = processor.sanitize_for_notion(dirty_text)
+
+        assert "/" not in clean_text
+        assert "\\" not in clean_text
+        assert "*" not in clean_text
+
 
 if __name__ == "__main__":
     unittest.main()

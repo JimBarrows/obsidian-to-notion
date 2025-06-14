@@ -1,22 +1,22 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=45", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "obsidian-to-notion"
-version = "0.1.0"
-description = "A Python utility for migrating Obsidian markdown files to Notion"
+version = "1.0.0"
+description = "Migration utility for Obsidian vaults to Notion databases"
 authors = [{name = "Your Name", email = "your.email@example.com"}]
-readme = "README.md"
 license = {text = "MIT"}
+readme = "README.md"
 requires-python = ">=3.8"
 dependencies = [
     "notion-client==2.3.0",
-    "tqdm==4.66.3",
+    "tqdm==4.66.1",
     "PyYAML==6.0.1",
     "python-dotenv==1.0.0",
-    "python-frontmatter==1.0.0",
-    "requests==2.32.4",
+    "python-frontmatter==1.1.0",
+    "requests>=2.25.0",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -32,29 +32,27 @@ classifiers = [
 ]
 
 [project.scripts]
-obsidian-to-notion = "obsidian_to_notion.main:main"
+obsidian-to-notion = "src.obsidian_to_notion.main:main"
 
 [project.optional-dependencies]
+test = [
+    "pytest>=6.0",
+    "pytest-cov>=2.10",
+    "coverage>=7.0",
+    "behave>=1.2.6",
+]
 dev = [
-    "pytest>=7.0",
-    "pytest-cov>=4.0",
-    "black>=23.0",
-    "flake8>=6.0",
+    "pytest>=6.0",
+    "pytest-cov>=2.10",
+    "black>=21.0",
+    "flake8>=3.8",
     "mypy>=1.0",
-    "pre-commit>=3.0",
-    "bandit[toml]>=1.7.5",
-    "safety>=3.0",
     "ruff>=0.1.0",
-    "isort>=5.12.0",
+    "bandit>=1.7.0",
+    "coverage>=7.0",
     "types-PyYAML>=6.0",
     "types-requests>=2.0",
-    "types-tqdm>=4.0",
-]
-test = [
-    "pytest>=7.0",
-    "pytest-cov>=4.0",
     "behave>=1.2.6",
-    "coverage>=7.0",
 ]
 
 [tool.setuptools.packages.find]
@@ -76,7 +74,7 @@ exclude = ["tests/", "venv/", "build/", "dist/"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-python_files = ["test_*.py", "*_test.py"]
+python_files = ["test_*.py"]
 
 [tool.bandit]
 exclude_dirs = ["tests", "venv", ".venv"]
@@ -97,6 +95,9 @@ exclude_lines = [
 ]
 precision = 2
 fail_under = 80
+
+[tool.coverage.xml]
+output = "coverage.xml"
 
 # [tool.isort] - Deprecated: Using ruff for import sorting
 # profile = "black"
