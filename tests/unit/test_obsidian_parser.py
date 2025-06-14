@@ -500,5 +500,199 @@ Contains [[Note 3]] and [[Note 4]] in content."""
         self.assertIn("Note 4", note_names)
 
 
+class TestYAMLParsingMethods(unittest.TestCase):
+    """Specific tests for YAML parsing helper methods."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        self.temp_dir = tempfile.mkdtemp()
+        self.vault_path = Path(self.temp_dir) / "test_vault"
+        self.vault_path.mkdir(parents=True)
+        self.processor = ObsidianVaultProcessor(str(self.vault_path))
+
+    def tearDown(self):
+        """Clean up test fixtures."""
+        shutil.rmtree(self.temp_dir)
+
+    def test_fix_yaml_common_errors_tabs_to_spaces(self):
+        """Test tab to space conversion in YAML."""
+        yaml_text = "attendees:\n\t- [[Robert Turnbull]]\n\t- [[John Doe]]"
+        fixed = self.processor._fix_yaml_common_errors(yaml_text)
+
+        self.assertNotIn("\t", fixed)
+        self.assertIn("  - [[Robert Turnbull]]", fixed)
+        self.assertIn("  - [[John Doe]]", fixed)
+
+    def test_fix_yaml_common_errors_missing_space_after_colon(self):
+        """Test fixing missing space after colon."""
+        yaml_text = "business name:Copart\nlocation:USA\nemployees:7000"
+        fixed = self.processor._fix_yaml_common_errors(yaml_text)
+
+        self.assertIn("business name: Copart", fixed)
+        self.assertIn("location: USA", fixed)
+        self.assertIn("employees: 7000", fixed)
+
+    def test_fix_yaml_common_errors_preserves_urls(self):
+        """Test that URLs are not modified."""
+        yaml_text = "url:https://docs.example.org/en/use/content\nother:value"
+        fixed = self.processor._fix_yaml_common_errors(yaml_text)
+
+        # URL should not have space added after colon
+        self.assertIn("url:https://docs.example.org/en/use/content", fixed)
+        # But normal field should have space added
+        self.assertIn("other: value", fixed)
+
+    def test_fix_yaml_errors_preserves_markdown_links(self):
+        """Test that markdown links in YAML are not broken."""
+        yaml_text = (
+            "author: [Kendra Cherry](https://www.verywellmind.com)\n" "title:Research"
+        )
+        fixed = self.processor._fix_yaml_common_errors(yaml_text)
+
+        # Markdown link should be preserved
+        self.assertIn("[Kendra Cherry](https://www.verywellmind.com)", fixed)
+        # But title should have space added
+        self.assertIn("title: Research", fixed)
+
+    def test_extract_yaml_split_standard_format(self):
+        """Test standard frontmatter extraction."""
+        content = "---\ntitle: Test\nauthor: John\n---\n\n# Content\n\nTest content"
+        yaml_text, markdown_content = self.processor._extract_yaml_content_split(
+            content
+        )
+
+        self.assertEqual(yaml_text, "title: Test\nauthor: John")
+        self.assertEqual(markdown_content, "# Content\n\nTest content")
+
+    def test_extract_yaml_split_missing_delimiter(self):
+        """Test handling missing closing delimiter."""
+        content = "---\ntitle: Test\nauthor: John\n\n# Content"
+        yaml_text, markdown_content = self.processor._extract_yaml_content_split(
+            content
+        )
+
+        self.assertEqual(yaml_text, "title: Test\nauthor: John")
+        self.assertEqual(markdown_content, "# Content")
+
+    def test_extract_yaml_split_no_frontmatter(self):
+        """Test content without frontmatter."""
+        content = "# Just Content\n\nNo frontmatter here."
+        yaml_text, markdown_content = self.processor._extract_yaml_content_split(
+            content
+        )
+
+        self.assertEqual(yaml_text, "")
+        self.assertEqual(markdown_content, content)
+
+    def test_parse_yaml_with_recovery_valid_yaml(self):
+        """Test recovery parser with valid YAML."""
+        yaml_text = "title: Test\ndate: 2024-01-15\ntags:\n  - test\n  - unit"
+        result = self.processor._parse_yaml_with_recovery(yaml_text)
+
+        self.assertEqual(result["title"], "Test")
+        self.assertEqual(result["tags"], ["test", "unit"])
+
+    def test_parse_yaml_with_recovery_template_placeholders(self):
+        """Test recovery parser with template placeholders."""
+        yaml_text = "author: {{author}}\ntitle: {{title}}\ndate: {{date}}"
+        result = self.processor._parse_yaml_with_recovery(yaml_text)
+
+        # Should replace template placeholders with empty strings
+        self.assertIn("author", result)
+        self.assertIn("title", result)
+        self.assertIn("date", result)
+        # Values should be empty strings, not the template syntax
+        self.assertEqual(result["author"], "")
+
+    def test_parse_yaml_with_recovery_nested_template_placeholders(self):
+        """Test recovery parser with nested template placeholders."""
+        yaml_text = """citation:
+  author: {{author}}
+  title: Example Title
+  blog: {{blog_name}}
+  date: {{date_of_post}}"""
+        result = self.processor._parse_yaml_with_recovery(yaml_text)
+
+        # Should have citation structure preserved
+        self.assertIn("citation", result)
+        if isinstance(result["citation"], dict):
+            self.assertIn("title", result["citation"])
+            self.assertEqual(result["citation"]["title"], "Example Title")
+
+    def test_parse_yaml_with_recovery_tabs_and_template_placeholders(self):
+        """Test recovery parser with both tabs and template placeholders."""
+        yaml_text = "attendees:\n\t- {{name1}}\n\t- {{name2}}\ntitle: {{title}}"
+        result = self.processor._parse_yaml_with_recovery(yaml_text)
+
+        # Should handle both issues
+        self.assertIsInstance(result, dict)
+        # Should extract some metadata even if structure is simplified
+
+    def test_parse_yaml_recovery_markdown_links(self):
+        """Test recovery parser with markdown links in values."""
+        yaml_text = (
+            "author: [Kendra Cherry](https://www.verywellmind.com)\n" "title: Research"
+        )
+        result = self.processor._parse_yaml_with_recovery(yaml_text)
+
+        # Should extract what it can
+        self.assertIsInstance(result, dict)
+
+    def test_parse_yaml_with_recovery_simple_fallback(self):
+        """Test that simple key-value extraction works as fallback."""
+        yaml_text = "title: Simple Title\nauthor: John Doe\ndate: 2024-01-15"
+        result = self.processor._parse_yaml_with_recovery(yaml_text)
+
+        self.assertEqual(result["title"], "Simple Title")
+        self.assertEqual(result["author"], "John Doe")
+        self.assertEqual(str(result["date"]), "2024-01-15")
+
+    def test_parse_yaml_recovery_handles_problematic_lines(self):
+        """Test that recovery handles various problematic constructs."""
+        yaml_text = (
+            "title: Good Title\nbroken: {{template}}\n"
+            "author: [[John Doe]]\ndate: 2024-01-15"
+        )
+        result = self.processor._parse_yaml_with_recovery(yaml_text)
+
+        # Should successfully parse after template replacement
+        self.assertEqual(result["title"], "Good Title")
+        self.assertEqual(str(result["date"]), "2024-01-15")
+        # Template placeholder should be replaced with empty string
+        self.assertEqual(result["broken"], "")
+        # [[John Doe]] is valid YAML (nested list), so it gets parsed
+        self.assertIn("author", result)
+        self.assertEqual(result["author"], [["John Doe"]])
+
+    def test_parse_yaml_with_recovery_empty_input(self):
+        """Test recovery parser with empty input."""
+        result = self.processor._parse_yaml_with_recovery("")
+        self.assertEqual(result, {})
+
+    def test_parse_yaml_with_recovery_multiple_placeholders_same_line(self):
+        """Test handling multiple template placeholders on same line."""
+        yaml_text = "date: {{date}} {{time}}\nlocation: {{location}}\ntitle: Meeting"
+        result = self.processor._parse_yaml_with_recovery(yaml_text)
+
+        # Should extract what it can
+        self.assertIn("title", result)
+        self.assertEqual(result["title"], "Meeting")
+
+    def test_parse_yaml_recovery_simple_fallback_only(self):
+        """Test that simple extraction fallback works for unparseable YAML."""
+        yaml_text = (
+            "title: Simple Title\nbroken: {{{ invalid yaml }}}\n"
+            "author: [[John Doe]]\ndate: 2024-01-15"
+        )
+        result = self.processor._parse_yaml_with_recovery(yaml_text)
+
+        # Should fall back to simple extraction
+        self.assertEqual(result["title"], "Simple Title")
+        self.assertEqual(result["date"], "2024-01-15")
+        # Should skip lines with problematic syntax
+        self.assertNotIn("broken", result)
+        self.assertNotIn("author", result)  # Contains [[ ]]
+
+
 if __name__ == "__main__":
     unittest.main()

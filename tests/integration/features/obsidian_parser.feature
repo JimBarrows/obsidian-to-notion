@@ -160,3 +160,111 @@ Feature: Obsidian Vault Processing
     Then all valid files should be processed
     And files with invalid YAML should not stop the migration
     And appropriate warnings should be logged for invalid files
+
+  Scenario: Handle template placeholder in nested YAML structure
+    Given a markdown file "nested_template.md" with complex template frontmatter:
+      """
+      ---
+      tags:
+      - note_type/raw_note/blog
+      - no_permanent_note_yet
+      citation:
+        author: {{author}}
+        title: Example Title
+        name_of_blog: {{name_of_blog}}
+        blog_network_publisher: {{blog_network_publisher}}
+        date_of_post: {{date_of_post}}
+        accessed: 2023-04-10
+        url: https://www.example.com
+      ---
+      # Content
+      Test content here.
+      """
+    When I process the vault
+    Then the file should be processed successfully
+    And the citation structure should be preserved
+    And template placeholders should be replaced with empty strings
+
+  Scenario: Handle multiple template placeholders on same line
+    Given a markdown file "multiple_placeholders.md" with frontmatter:
+      """
+      ---
+      tags:
+      - note_type/raw_note/meeting
+      - no_permanent_note
+      attendees:
+      date: {{date}} {{time}}
+      location: {{location}}
+      ---
+      # Meeting Notes
+      Meeting content here.
+      """
+    When I process the vault
+    Then the file should be processed successfully
+    And all template placeholders should be handled gracefully
+    And the content should remain intact
+
+  Scenario: Handle markdown links in YAML values
+    Given a markdown file "markdown_in_yaml.md" with frontmatter:
+      """
+      ---
+      tags: [research]
+      citation:
+        author: [Kendra Cherry](https://www.verywellmind.com/kendra-cherry)
+        title: Scientific Research Methods
+        publisher: [Very Well Mind](https://www.verywellmind.com)
+      ---
+      # Research Notes
+      Content with scientific citations.
+      """
+    When I process the vault
+    Then the file should be processed successfully
+    And markdown links in YAML should be handled gracefully
+
+  Scenario: Handle YAML with unquoted colon in values
+    Given a markdown file "unquoted_colon.md" with frontmatter:
+      """
+      ---
+      title: Book: The Complete Guide
+      subtitle: Everything: You Need to Know
+      author: John Doe
+      ---
+      # Book Notes
+      Notes about the book.
+      """
+    When I process the vault
+    Then the file should be processed successfully
+    And colons in values should be handled properly
+
+  Scenario: Handle missing spaces after colons in YAML
+    Given a markdown file "missing_spaces.md" with frontmatter:
+      """
+      ---
+      business name:Copart
+      In contacts:No
+      url:https://docs.example.org/en/use/content
+      ---
+      # Organization Notes
+      Company information.
+      """
+    When I process the vault
+    Then the file should be processed successfully
+    And missing spaces after colons should be corrected
+
+  Scenario: Handle tab characters in YAML
+    Given a markdown file "tabs_in_yaml.md" with frontmatter:
+      """
+      ---
+      attendees:
+      	- [[Robert Turnbull]]
+      	- [[Sarah Moore]]
+      tags:
+      	- meeting
+      	- planning
+      ---
+      # Meeting Notes
+      Meeting with team members.
+      """
+    When I process the vault
+    Then the file should be processed successfully
+    And tab characters should be converted to spaces
