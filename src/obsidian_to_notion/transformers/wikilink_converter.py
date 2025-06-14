@@ -37,7 +37,8 @@ class WikilinkConverter:
 
         Args:
             content: Original markdown content
-            wikilinks: List of wikilink dictionaries with 'note_name' and optional 'alias'
+            wikilinks: List of wikilink dictionaries with 'note_name' and optional
+                'alias'
 
         Returns:
             Content with converted links
